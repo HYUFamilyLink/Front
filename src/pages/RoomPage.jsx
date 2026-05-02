@@ -61,8 +61,7 @@ export default function RoomPage() {
   const [playingVideo, setPlayingVideo] = useState(null);
   const [isVideoPlaying, setIsVideoPlaying] = useState(false); 
   
-  // ✨ 유튜브 볼륨 상태 추가 (0~100)
-  const [ytVolume, setYtVolume] = useState(50);
+  const [ytVolume, setYtVolume] = useState(80);
 
   const playingVideoRef = useRef(playingVideo);
   const userRef = useRef(user);
@@ -797,7 +796,6 @@ const styles = {
     animation: 'spin 1s linear infinite', marginBottom: '10px'
   },
 
-  // ✨ 볼륨 컨트롤 영역 레이아웃
   volumeControlContainer: {
     display: 'flex', 
     alignItems: 'center', 
