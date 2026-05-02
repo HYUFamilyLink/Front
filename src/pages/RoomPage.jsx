@@ -7,8 +7,32 @@ import { getSocket } from '../hooks/useSocket';
 import { api } from '../api/client';
 import YouTube from 'react-youtube'; 
 
-const EMOJIS = ['🎤', '👏', '🔥', '❤️', '😂', '🎵'];
-const AGORA_OFFSET_SEC = 0.15; // Agora 음성 지연 보정값: 관객 YouTube를 목소리보다 이 만큼 뒤로 당겨서 싱크
+const AGORA_OFFSET_SEC = 0.15; 
+
+const REACTION_DATA = [
+  { id: 'kick', icon: '🥁', sounds: ['/sounds/kick1.mp3','/sounds/kick2.mp3'] },
+  { id: 'clap', icon: '👏', sounds: ['/sounds/clap1.mp3', '/sounds/clap2.mp3'] },
+  { id: 'bell', icon: '🛎️', sounds: ['/sounds/chime1.mp3'] },
+  { id: 'drum', icon: '🪘', sounds: ['/sounds/drum1.mp3','/sounds/drum2.mp3'] }, 
+  { id: 'tambourine', icon: '🪇', sounds: ['/sounds/tam1.mp3', '/sounds/tam2.mp3'] },
+];
+
+const playReactionSound = (reactionId) => {
+  const reactionObj = REACTION_DATA.find(r => r.id === reactionId);
+  if (!reactionObj || !reactionObj.sounds || reactionObj.sounds.length === 0) return;
+  
+  const soundArray = reactionObj.sounds;
+  const randomFile = soundArray[Math.floor(Math.random() * soundArray.length)];
+  
+  const audio = new Audio(randomFile);
+  audio.preservesPitch = false; 
+  audio.webkitPreservesPitch = false; 
+  
+  audio.playbackRate = 0.85 + Math.random() * 0.3;
+  audio.volume = 0.8; 
+  
+  audio.play().catch((err) => console.log('사운드 자동재생 차단됨:', err));
+};
 
 export default function RoomPage() {
   const navigate = useNavigate();
@@ -35,8 +59,10 @@ export default function RoomPage() {
   const [isMicOn, setIsMicOn] = useState(!muted);
   
   const [playingVideo, setPlayingVideo] = useState(null);
-  
   const [isVideoPlaying, setIsVideoPlaying] = useState(false); 
+  
+  // ✨ 유튜브 볼륨 상태 추가 (0~100)
+  const [ytVolume, setYtVolume] = useState(50);
 
   const playingVideoRef = useRef(playingVideo);
   const userRef = useRef(user);
@@ -124,15 +150,21 @@ export default function RoomPage() {
 
     const onReaction = (data) => {
       if (isLeaving.current) return;
+      
+      playReactionSound(data.reactionId || data.emoji);
+
+      const reactionObj = REACTION_DATA.find(r => r.id === data.reactionId || r.icon === data.emoji);
+      const displayIcon = reactionObj ? reactionObj.icon : (data.emoji || '✨');
+
       const rid = Date.now() + Math.random();
-      setActiveReactions(prev => [...prev, { ...data, id: rid, left: Math.floor(Math.random() * 60) + 20 }]);
+      setActiveReactions(prev => [...prev, { ...data, emoji: displayIcon, id: rid, left: Math.floor(Math.random() * 60) + 20 }]);
       setTimeout(() => setActiveReactions(prev => prev.filter(r => r.id !== rid)), 4000);
     };
 
     const onSongPlay = (data) => {
       if (!isLeaving.current) {
         setPlayingVideo(data);
-        setIsVideoPlaying(false); // 재생 명령이 오면 일단 화면 가리기 (로딩 중)
+        setIsVideoPlaying(false); 
         setShowSongPicker(false);
       }
     };
@@ -196,15 +228,19 @@ export default function RoomPage() {
 
   const onPlayerReady = (event) => {
     ytPlayerRef.current = event.target;
+    
+    if (typeof ytPlayerRef.current.setVolume === 'function') {
+      ytPlayerRef.current.setVolume(ytVolume);
+    }
+
     const currentVideo = playingVideoRef.current;
     const currentUser = userRef.current;
     if (!currentVideo || !currentUser) return;
 
     const isSinger = String(currentUser.id).trim() === String(currentVideo.singerId).trim();
 
-    if (isSinger) return; // 가수는 그냥 재생
+    if (isSinger) return; 
 
-    // startAt 기반으로 현재 재생 위치 계산 (중간입장 포함)
     if (currentVideo.startAt) {
       const elapsed = (Date.now() - currentVideo.startAt) / 1000;
       const seekTo = Math.max(0, elapsed - AGORA_OFFSET_SEC);
@@ -212,7 +248,6 @@ export default function RoomPage() {
       event.target.seekTo(seekTo, true);
     }
 
-    // 드리프트 보정용 백업 싱크 요청
     getSocket()?.emit('song:request_sync');
   };
 
@@ -220,7 +255,7 @@ export default function RoomPage() {
     const PLAYING = 1;
     const ENDED = 0;
     const BUFFERING = 3;
-    const CUED = 5; // 영상 로드 완료 상태
+    const CUED = 5; 
 
     const currentVideo = playingVideoRef.current;
     const currentUser = userRef.current;
@@ -228,14 +263,12 @@ export default function RoomPage() {
 
     const amISingingNow = String(currentUser.id).trim() === String(currentVideo.singerId).trim();
 
-    // 1. 재생 시작 또는 버퍼링 후 재개 시
     if (event.data === PLAYING) {
       if (amISingingNow) {
         setIsVideoPlaying(true);
         event.target.getCurrentTime().then(time => {
           getSocket()?.emit('song:send_sync', { time });
         });
-        // 3초마다 싱크 기준점 발송
         if (!syncIntervalRef.current) {
           syncIntervalRef.current = setInterval(() => {
             if (ytPlayerRef.current?.getCurrentTime) {
@@ -270,7 +303,6 @@ export default function RoomPage() {
       }
     }
   };
-
 
   const handleLeave = async () => {
     if (isLeaving.current) return;
@@ -338,7 +370,13 @@ export default function RoomPage() {
     !participants.some(p => String(p.id).trim() === String(f.id).trim())
   ) || [];
 
-  const sendEmoji = (emoji) => { getSocket()?.emit('user:reaction', { emoji }); };
+  const sendEmoji = (reactionId) => { 
+    const reactionObj = REACTION_DATA.find(r => r.id === reactionId);
+    getSocket()?.emit('user:reaction', { 
+      reactionId: reactionId, 
+      emoji: reactionObj ? reactionObj.icon : '✨'
+    }); 
+  };
   
   const executeSearch = async () => {
     if (!songSearch.trim()) return;
@@ -363,6 +401,14 @@ export default function RoomPage() {
     setIsVideoPlaying(false);
   };
 
+  const handleVolumeChange = (e) => {
+    const newVolume = parseInt(e.target.value, 10);
+    setYtVolume(newVolume);
+    if (ytPlayerRef.current && typeof ytPlayerRef.current.setVolume === 'function') {
+      ytPlayerRef.current.setVolume(newVolume);
+    }
+  };
+
   if (!roomId && !isLeaving.current) return null;
 
   const currentTurnUser = participants.find(p => String(p.id).trim() === String(currentTurnId).trim());
@@ -382,6 +428,7 @@ export default function RoomPage() {
           min-height: 0;
           border-radius: 0.75rem;
           overflow: hidden;
+          pointer-events: none;
         }
         .youtube-video-container iframe {
           position: absolute;
@@ -389,6 +436,30 @@ export default function RoomPage() {
           left: 0;
           width: 100%;
           height: 100%;
+        }
+
+        /* ✨ 볼륨 슬라이더 커스텀 스타일 */
+        .yt-volume-slider {
+          -webkit-appearance: none;
+          width: 100%;
+          height: 6px;
+          border-radius: 3px;
+          background: rgba(255, 255, 255, 0.2);
+          outline: none;
+          margin: 0;
+        }
+        .yt-volume-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 14px;
+          height: 14px;
+          border-radius: 50%;
+          background: #e94560;
+          cursor: pointer;
+          transition: transform 0.1s;
+        }
+        .yt-volume-slider::-webkit-slider-thumb:hover {
+          transform: scale(1.2);
         }
       `}</style>
 
@@ -415,9 +486,11 @@ export default function RoomPage() {
 
       <div style={styles.mainDisplay}>
         {playingVideo ? (
-          <div style={{...styles.songCard, position: 'relative', pointerEvents: 'none' }}>
+          <div style={{...styles.songCard, position: 'relative' }}>
             
-            {/* ✨ 진짜 재생이 시작되기 전까지만 띄워두는 가짜 로딩 화면 */}
+            {/* 유튜브 영상 클릭 방지를 위한 오버레이 */}
+            <div style={{position: 'absolute', top:0, left:0, right:0, bottom:0, zIndex: 1, pointerEvents: 'none'}}></div>
+
             {!isVideoPlaying && (
               <div style={styles.loadingOverlay}>
                 <div style={styles.loadingSpinner}></div>
@@ -436,8 +509,27 @@ export default function RoomPage() {
                 onStateChange={onPlayerStateChange} 
               />
             </div>
-            <h2 style={{...styles.songTitle, marginTop: '0.75rem'}}>{playingVideo.title}</h2>
-            <p style={styles.songArtist}>{playingVideo.artist}</p>
+            
+            <div style={{ width: '100%', pointerEvents: 'auto', zIndex: 2 }}>
+              <h2 style={{...styles.songTitle, marginTop: '0.75rem'}}>{playingVideo.title}</h2>
+              <p style={styles.songArtist}>{playingVideo.artist}</p>
+              
+              {/* ✨ 개인용 유튜브 볼륨 컨트롤 */}
+              <div style={styles.volumeControlContainer}>
+                <span style={{ fontSize: '0.85rem', color: '#aaa', minWidth: '40px' }}>MR</span>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value={ytVolume} 
+                  onChange={handleVolumeChange}
+                  className="yt-volume-slider"
+                />
+                <span style={{ fontSize: '0.85rem', color: '#aaa', minWidth: '30px', textAlign: 'right' }}>
+                  {ytVolume}%
+                </span>
+              </div>
+            </div>
           </div>
         ) : (
           <div style={styles.songCard}>
@@ -517,11 +609,14 @@ export default function RoomPage() {
 
       <footer style={styles.footer}>
         <div style={styles.emojiRow}>
-          {EMOJIS.map(e => (<button key={e} onClick={() => sendEmoji(e)} style={styles.emojiBtn}>{e}</button>))}
+          {REACTION_DATA.map(reaction => (
+            <button key={reaction.id} onClick={() => sendEmoji(reaction.id)} style={styles.emojiBtn}>
+              {reaction.icon}
+            </button>
+          ))}
         </div>
         
         {amISinging ? (
-    // 노래 부르는 중일 때 (기존 유지)
     <button 
       onClick={handleSkipTurn} 
       style={{
@@ -676,8 +771,8 @@ const styles = {
   songCard: { 
     display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
     textAlign: 'center', padding: 'clamp(0.75rem, 2vw, 1.25rem)', background: 'rgba(233,69,96,0.1)', 
-    borderRadius: '1.5rem', border: '2px solid #e94560', width: '100%', maxWidth: '34rem', 
-    height: 'clamp(14rem, 35vh, 20rem)', boxSizing: 'border-box' 
+    borderRadius: '1.5rem', border: '2px solid #e94560', width: '100%', maxWidth: '52rem', 
+    height: '100%', maxHeight: '55vh', boxSizing: 'border-box' 
   },
   
   tagBadge: {
@@ -700,6 +795,17 @@ const styles = {
     width: '40px', height: '40px', border: '4px solid rgba(255,255,255,0.3)',
     borderTop: '4px solid #e94560', borderRadius: '50%',
     animation: 'spin 1s linear infinite', marginBottom: '10px'
+  },
+
+  // ✨ 볼륨 컨트롤 영역 레이아웃
+  volumeControlContainer: {
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    gap: '0.5rem',
+    marginTop: '0.5rem',
+    width: '80%',
+    margin: '0.5rem auto 0',
   },
 
   songTitle: { fontSize: 'clamp(1rem, 3.5vw, 1.25rem)', margin: '0 0 0.25rem', wordBreak: 'keep-all', color: '#fff' },
@@ -738,9 +844,9 @@ const styles = {
     flex: 1,
     padding: '0.75rem 0.5rem',
     borderRadius: '0.75rem',
-    background: '#30475e', // 가독성을 위해 차분한 남색 계열
+    background: '#30475e', 
     color: '#fff',
-    fontSize: 'clamp(0.85rem, 3vw, 1rem)', // 메인 버튼보다 작게 설정
+    fontSize: 'clamp(0.85rem, 3vw, 1rem)', 
     fontWeight: 'bold',
     border: 'none',
     cursor: 'pointer',
