@@ -43,7 +43,9 @@ export default function RoomPage() {
   const refreshFriends = useAuthStore((s) => s.refreshFriends);
 
   const { roomId, joinCode, participants, currentTurnId } = useRoomStore();
-  const { start, stop, toggleMute, muted } = useVoice();
+  
+  // ✨ useVoice에서 볼륨 데이터(volumes)를 추가로 받아옵니다.
+  const { start, stop, toggleMute, muted, volumes = {} } = useVoice();
 
   const [showSongPicker, setShowSongPicker] = useState(false);
   const [songSearch, setSongSearch] = useState('');
@@ -78,7 +80,12 @@ export default function RoomPage() {
 
   const handleMicToggle = () => {
     if (toggleMute) toggleMute(); 
-    setIsMicOn((prev) => !prev); 
+    setIsMicOn((prev) => {
+      const newState = !prev;
+      // ✨ 내 마이크 상태가 변했음을 서버를 통해 방 전체에 알림
+      getSocket()?.emit('voice:mute_toggle', { isMicOn: newState });
+      return newState;
+    }); 
   };
 
   useEffect(() => {
@@ -90,13 +97,28 @@ export default function RoomPage() {
       return; 
     }
 
+    // ✨ 마이크 연결 및 초기화 로직 (에러 캐치 후 동기화 보강)
     const initData = async () => {
       try {
         await start(roomId);
         await refreshFriends(); 
         getSocket()?.emit('room:request_state', { roomId });
+        
+        // 연결 성공 시, 방의 모든 사람에게 내 마이크가 켜졌다고 최초 발송
+        getSocket()?.emit('voice:mute_toggle', { isMicOn: true });
+        setIsMicOn(true);
+        
         setIsInitialLoading(false);
       } catch (err) {
+        console.error("🚨 최초 마이크 연결 실패 (권한 거부 또는 서버 에러):", err);
+        
+        // 에러가 났으므로 화면의 마이크 버튼을 강제로 끄기 상태로 동기화
+        setIsMicOn(false);
+        getSocket()?.emit('voice:mute_toggle', { isMicOn: false });
+        
+        // 방 정보는 가져와야 방 입장이 완료되므로 진행
+        await refreshFriends();
+        getSocket()?.emit('room:request_state', { roomId });
         setIsInitialLoading(false);
       }
     };
@@ -108,8 +130,16 @@ export default function RoomPage() {
       
       useRoomStore.setState((state) => {
         const rawParticipants = data.participants || state.participants;
+        const mergedParticipants = rawParticipants.map(newP => {
+          const existingP = state.participants.find(p => String(p.id).trim() === String(newP.id).trim());
+          return {
+            ...newP,
+            isMicOn: existingP && existingP.isMicOn !== undefined ? existingP.isMicOn : true
+          };
+        });
+
         const uniqueParticipants = Array.from(
-          new Map(rawParticipants.map(p => [String(p.id).trim(), p])).values()
+          new Map(mergedParticipants.map(p => [String(p.id).trim(), p])).values()
         );
 
         return {
@@ -206,6 +236,14 @@ export default function RoomPage() {
       }
     };
 
+    const onMuteStatus = ({ userId, isMicOn }) => {
+      useRoomStore.setState((state) => ({
+        participants: state.participants.map(p =>
+          String(p.id).trim() === String(userId).trim() ? { ...p, isMicOn } : p
+        )
+      }));
+    };
+
     socket.on('room:state', onRoomState);
     socket.on('friend:update', onFriendUpdate);
     socket.on('user:reaction', onReaction);
@@ -213,6 +251,7 @@ export default function RoomPage() {
     socket.on('song:stop', onSongStop); 
     socket.on('song:request_sync', onRequestSync);
     socket.on('song:receive_sync', onReceiveSync);
+    socket.on('voice:mute_status', onMuteStatus);
 
     return () => { 
       socket.off('room:state', onRoomState);
@@ -222,6 +261,7 @@ export default function RoomPage() {
       socket.off('song:stop', onSongStop);
       socket.off('song:request_sync', onRequestSync);
       socket.off('song:receive_sync', onReceiveSync);
+      socket.off('voice:mute_status', onMuteStatus); 
     };
   }, [roomId, navigate, start, refreshFriends]); 
 
@@ -437,7 +477,6 @@ export default function RoomPage() {
           height: 100%;
         }
 
-        /* ✨ 볼륨 슬라이더 커스텀 스타일 */
         .yt-volume-slider {
           -webkit-appearance: none;
           width: 100%;
@@ -487,7 +526,6 @@ export default function RoomPage() {
         {playingVideo ? (
           <div style={{...styles.songCard, position: 'relative' }}>
             
-            {/* 유튜브 영상 클릭 방지를 위한 오버레이 */}
             <div style={{position: 'absolute', top:0, left:0, right:0, bottom:0, zIndex: 1, pointerEvents: 'none'}}></div>
 
             {!isVideoPlaying && (
@@ -513,7 +551,6 @@ export default function RoomPage() {
               <h2 style={{...styles.songTitle, marginTop: '0.75rem'}}>{playingVideo.title}</h2>
               <p style={styles.songArtist}>{playingVideo.artist}</p>
               
-              {/* ✨ 개인용 유튜브 볼륨 컨트롤 */}
               <div style={styles.volumeControlContainer}>
                 <span style={{ fontSize: '0.85rem', color: '#aaa', minWidth: '40px' }}>MR</span>
                 <input 
@@ -569,12 +606,18 @@ export default function RoomPage() {
             else if (isSent) buttonText = '요청됨';
             else if (isReceived) buttonText = '수락하기';
 
+            const isUserMicOn = isMe ? isMicOn : (p.isMicOn ?? true); 
+            const currentVolume = volumes[p.id] || 0; 
+            
+            const pulseScale = 1 + (currentVolume / 100) * 0.8; 
+
             return (
               <div key={p.id} style={{
                 ...styles.userItem,
                 border: isThisUserTurn ? '2px solid #f9d423' : 'none' 
               }}>
                 <div style={styles.userInfo}>
+                  
                   <div style={{...styles.avatar, background: 'transparent', overflow: 'hidden'}}>
                     <img 
                       src={avatarPath} 
@@ -582,10 +625,24 @@ export default function RoomPage() {
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
                     />
                   </div>
+                  
+                  <div style={styles.micStatusBox}>
+                    {!isUserMicOn ? (
+                      <span style={{ fontSize: '0.85rem' }}>🔇</span>
+                    ) : (
+                      <div style={{
+                        ...styles.activeMicDot,
+                        transform: `scale(${pulseScale})`, 
+                        opacity: currentVolume > 5 ? 1 : 0.6 
+                      }} />
+                    )}
+                  </div>
+
                   <span style={styles.userName}>
                     {p.nickname} {isMe && "(나)"} {isThisUserTurn && " 🎤"} 
                   </span>
                 </div>
+
                 {!isMe && (
                   <button
                     onClick={() => handleFriendAction(p.id)}
@@ -616,47 +673,47 @@ export default function RoomPage() {
         </div>
         
         {amISinging ? (
-    <button 
-      onClick={handleSkipTurn} 
-      style={{
-        ...styles.addSongBtn, 
-        background: '#f9d423', 
-        color:'#1a1a2e',
-        cursor: 'pointer'
-      }}
-    >
-      차례 넘기기
-    </button>
-  ) : isMyTurn ? (
-    <div style={{ display: 'flex', gap: '0.5rem' }}>
-      <button 
-        onClick={() => setShowSongPicker(true)} 
-        style={{ ...styles.addSongBtn, flex: 3, background: '#e94560', cursor: 'pointer' }}
-      >
-        🎶 노래 고르기
-      </button>
-      <button 
-        onClick={handleSkipTurn} 
-        disabled={participants.length <= 1}
-        style={{ 
-          ...styles.smallPassBtn,
-          background: participants.length <= 1 ? '#444' : '#f9d423',
-          color: participants.length <= 1 ? '#888' : '#fff',
-          cursor: participants.length <= 1 ? 'not-allowed' : 'pointer',
-          opacity: participants.length <= 1 ? 0.6 : 1
-        }}
-      >
-        넘기기
-      </button>
-    </div>
-  ) : (
-    <button 
-      style={{ ...styles.addSongBtn, background: '#444', cursor: 'not-allowed' }}
-      disabled
-    >
-      차례 대기
-    </button>
-  )}
+          <button 
+            onClick={handleSkipTurn} 
+            style={{
+              ...styles.addSongBtn, 
+              background: '#f9d423', 
+              color:'#1a1a2e',
+              cursor: 'pointer'
+            }}
+          >
+            차례 넘기기
+          </button>
+        ) : isMyTurn ? (
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button 
+              onClick={() => setShowSongPicker(true)} 
+              style={{ ...styles.addSongBtn, flex: 3, background: '#e94560', cursor: 'pointer' }}
+            >
+              🎶 노래 고르기
+            </button>
+            <button 
+              onClick={handleSkipTurn} 
+              disabled={participants.length <= 1}
+              style={{ 
+                ...styles.smallPassBtn,
+                background: participants.length <= 1 ? '#444' : '#f9d423',
+                color: participants.length <= 1 ? '#888' : '#fff',
+                cursor: participants.length <= 1 ? 'not-allowed' : 'pointer',
+                opacity: participants.length <= 1 ? 0.6 : 1
+              }}
+            >
+              넘기기
+            </button>
+          </div>
+        ) : (
+          <button 
+            style={{ ...styles.addSongBtn, background: '#444', cursor: 'not-allowed' }}
+            disabled
+          >
+            차례 대기
+          </button>
+        )}
       </footer>
 
       {showSongPicker && (
@@ -685,20 +742,17 @@ export default function RoomPage() {
                 </div>
               )}
               {songs.map(s => (
-    <div key={s.id} style={styles.songItem} onClick={() => reserveSong(s)}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 'clamp(1.1rem, 4vw, 1.25rem)', fontWeight: 'bold' }}>{s.title}</div>
-        
-        {s.tags && s.tags.map((tag, index) => (
-          <span key={index} style={styles.tagBadge}>
-            {tag}
-          </span>
-        ))}
-      </div>
-      <div style={{fontSize: 'clamp(0.9rem, 3.5vw, 1rem)', color: '#aaa', marginTop: '0.25rem'}}>{s.artist}</div>
-    </div>
-  ))}
-</div>
+                <div key={s.id} style={styles.songItem} onClick={() => reserveSong(s)}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 'clamp(1.1rem, 4vw, 1.25rem)', fontWeight: 'bold' }}>{s.title}</div>
+                    {s.tags && s.tags.map((tag, index) => (
+                      <span key={index} style={styles.tagBadge}>{tag}</span>
+                    ))}
+                  </div>
+                  <div style={{fontSize: 'clamp(0.9rem, 3.5vw, 1rem)', color: '#aaa', marginTop: '0.25rem'}}>{s.artist}</div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -819,6 +873,25 @@ const styles = {
   userItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '0.6rem 0.8rem', borderRadius: '0.75rem' },
   userInfo: { display: 'flex', alignItems: 'center', gap: '0.75rem' },
   avatar: { width: 'clamp(2rem, 8vw, 2.5rem)', height: 'clamp(2rem, 8vw, 2.5rem)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'clamp(1rem, 3.5vw, 1.25rem)', fontWeight: 'bold', color: '#fff' },
+
+  micStatusBox: { 
+    width: '24px', 
+    height: '24px', 
+    borderRadius: '50%', 
+    background: 'rgba(0,0,0,0.3)', 
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center' 
+  },
+  activeMicDot: { 
+    width: '10px', 
+    height: '10px', 
+    borderRadius: '50%', 
+    background: '#4ade80', 
+    boxShadow: '0 0 6px #4ade80',
+    transition: 'transform 0.1s ease-out, opacity 0.1s ease-out' 
+  },
+
   userName: { fontSize: 'clamp(0.9rem, 3.5vw, 1rem)' },
   friendBtn: { padding: '0.4rem 0.6rem', borderRadius: '0.5rem', border: 'none', background: '#30475e', color: '#fff', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s ease', fontSize: 'clamp(0.8rem, 2.5vw, 0.9rem)', whiteSpace: 'nowrap' },
   receivedThumpEffect: { background: 'linear-gradient(45deg, #f9d423, #ff4e50)', color: '#1a1a2e', animation: 'heartbeat 1.2s infinite ease-in-out, pulseGlow 1.2s infinite' },

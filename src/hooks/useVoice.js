@@ -10,18 +10,19 @@ export function useVoice() {
 
   const [connected, setConnected] = useState(false);
   const [muted,     setMuted]     = useState(false);
+  
+  const [volumes, setVolumes] = useState({});
 
   const start = useCallback(async (roomId) => {
-    // 이미 연결된 상태면 무시 (레이스 컨디션 방지: 비동기 전에 즉시 설정)
+
     if (clientRef.current) return;
 
-    // 저지연 모드: 무음 구간 패킷 전송 억제로 지연 감소
     AgoraRTC.setParameter('AUDIO_SESSION_ENABLE_OPUS_DTX', true);
 
     const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'h264' });
     clientRef.current = client;
 
-    // 모바일 autoplay 차단 시 사용자에게 탭 유도
+
     AgoraRTC.onAutoplayFailed = () => {
       const btn = document.createElement('button');
       btn.innerText = '🔊 소리를 켜려면 탭하세요';
@@ -38,7 +39,7 @@ export function useVoice() {
       document.body.appendChild(btn);
     };
 
-    // 1. 다른 사용자 음성 자동 구독 (join 전에 등록해야 함)
+    // 1. 다른 사용자 음성 자동 구독
     client.on('user-published', async (remoteUser, mediaType) => {
       console.log('[Agora] user-published:', remoteUser.uid, mediaType);
       await client.subscribe(remoteUser, mediaType);
@@ -47,32 +48,43 @@ export function useVoice() {
         remoteUser.audioTrack.play();
       }
     });
+    client.enableAudioVolumeIndicator();
+    client.on('volume-indicator', (volumesData) => {
+      const newVolumes = {};
+      volumesData.forEach((vol) => {
+        newVolumes[String(vol.uid)] = vol.level; 
+      });
+      setVolumes(newVolumes);
+    });
 
     try {
-      // 2. BackServer에서 Agora 토큰 발급
       console.log('[Agora] fetching token for roomId:', roomId);
       
-      // API 응답 객체 구조 안전장치 추가
-      const response = await api.get(`/api/agora/token?roomId=${roomId}`);
-      const token = response.data?.token || response.token;
-      const uid = response.data?.uid || response.uid;
+      let token = null;
+      let uid = null;
       
-      console.log('[Agora] joining channel:', String(roomId), 'uid:', uid);
+      try {
+        const response = await api.get(`/api/agora/token?roomId=${roomId}`);
+        token = response?.data?.token || response?.token || null;
+        uid = response?.data?.uid || response?.uid || null;
+      } catch (apiErr) {
+        console.warn('[Agora] 토큰 API 호출 실패 (테스트 모드로 null 접속 시도):', apiErr.message);
+      }
+      
+      console.log('[Agora] joining channel:', String(roomId), 'uid:', uid, 'token:', token ? '존재함' : 'null');
 
-      // 3. 채널 입장
       await client.join(APP_ID, String(roomId), token, uid);
       console.log('[Agora] joined successfully');
 
-      // 4. 마이크 트랙 생성 및 발행
       const localTrack = await AgoraRTC.createMicrophoneAudioTrack({
         encoderConfig: {
-          sampleRate: 48000, // 고음질 샘플레이트 유지
-          stereo: false,     // 모노: 스테레오 대비 절반 bitrate → 지연 감소
-          bitrate: 64,       // 64kbps: high_quality(128kbps) 대비 지연 절반
+          sampleRate: 48000, 
+          stereo: false,     
+          bitrate: 64,       
         },
-        AEC: true, // 에코 캔슬링 (하울링 방지)
-        ANS: true, // 노이즈 캔슬링
-        AGC: true, // 자동 게인 컨트롤
+        AEC: true, 
+        ANS: true, 
+        AGC: true, 
       });
       
       localTrackRef.current = localTrack;
@@ -109,7 +121,8 @@ export function useVoice() {
     clientRef.current = null;
     setConnected(false);
     setMuted(false);
+    setVolumes({}); // 나갈 때 볼륨 초기화
   }, []);
 
-  return { start, stop, toggleMute, connected, muted };
+  return { start, stop, toggleMute, connected, muted, volumes };
 }
