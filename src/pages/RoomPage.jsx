@@ -44,8 +44,8 @@ export default function RoomPage() {
 
   const { roomId, joinCode, participants, currentTurnId } = useRoomStore();
   
-  // ✨ useVoice에서 볼륨 데이터(volumes)를 추가로 받아옵니다.
-  const { start, stop, toggleMute, muted, volumes = {} } = useVoice();
+  // ✨ connected 상태를 추가로 가져옵니다.
+  const { start, stop, toggleMute, muted, connected, volumes = {} } = useVoice();
 
   const [showSongPicker, setShowSongPicker] = useState(false);
   const [songSearch, setSongSearch] = useState('');
@@ -78,14 +78,31 @@ export default function RoomPage() {
   const isMyTurn = currentTurnId ? String(user?.id).trim() === String(currentTurnId).trim() : false;
   const amISinging = playingVideo?.singerId ? String(user?.id).trim() === String(playingVideo.singerId).trim() : false;
 
-  const handleMicToggle = () => {
-    if (toggleMute) toggleMute(); 
-    setIsMicOn((prev) => {
-      const newState = !prev;
-      // ✨ 내 마이크 상태가 변했음을 서버를 통해 방 전체에 알림
-      getSocket()?.emit('voice:mute_toggle', { isMicOn: newState });
-      return newState;
-    }); 
+  // ✨ 마이크 토글 로직 강화 (예외 처리 및 자동 복구)
+  const handleMicToggle = async () => {
+    try {
+      // 아고라 연결 자체가 안 된 상태(최초 에러 등)라면 재연결 우선 시도
+      if (!connected) {
+        await start(roomId);
+        setIsMicOn(true);
+        getSocket()?.emit('voice:mute_toggle', { isMicOn: true });
+        return;
+      }
+
+      // 정상 연결 상태면 단순 토글 수행
+      if (toggleMute) await toggleMute(); 
+      setIsMicOn((prev) => {
+        const newState = !prev;
+        getSocket()?.emit('voice:mute_toggle', { isMicOn: newState });
+        return newState;
+      }); 
+    } catch (err) {
+      console.error("🚨 마이크 전환 중 에러 발생 (자동 꺼짐 전환):", err);
+      // 에러 시 강제로 내 UI를 끄고 타인에게도 꺼짐 상태 전파
+      setIsMicOn(false);
+      getSocket()?.emit('voice:mute_toggle', { isMicOn: false });
+      alert("마이크 연결에 문제가 발생했습니다. 권한을 확인해주세요.");
+    }
   };
 
   useEffect(() => {
@@ -97,28 +114,33 @@ export default function RoomPage() {
       return; 
     }
 
-    // ✨ 마이크 연결 및 초기화 로직 (에러 캐치 후 동기화 보강)
     const initData = async () => {
       try {
         await start(roomId);
         await refreshFriends(); 
         getSocket()?.emit('room:request_state', { roomId });
         
-        // 연결 성공 시, 방의 모든 사람에게 내 마이크가 켜졌다고 최초 발송
-        getSocket()?.emit('voice:mute_toggle', { isMicOn: true });
         setIsMicOn(true);
+        
+        // ✨ 서버에 방 참여가 완전히 등록될 시간을 벌어준 뒤 상태 전파 (타이밍 이슈 해결)
+        setTimeout(() => {
+          getSocket()?.emit('voice:mute_toggle', { isMicOn: true });
+        }, 500);
         
         setIsInitialLoading(false);
       } catch (err) {
         console.error("🚨 최초 마이크 연결 실패 (권한 거부 또는 서버 에러):", err);
         
-        // 에러가 났으므로 화면의 마이크 버튼을 강제로 끄기 상태로 동기화
         setIsMicOn(false);
-        getSocket()?.emit('voice:mute_toggle', { isMicOn: false });
         
-        // 방 정보는 가져와야 방 입장이 완료되므로 진행
         await refreshFriends();
         getSocket()?.emit('room:request_state', { roomId });
+        
+        // ✨ 에러 발생에 의한 꺼짐 상태도 확실하게 전파
+        setTimeout(() => {
+          getSocket()?.emit('voice:mute_toggle', { isMicOn: false });
+        }, 500);
+        
         setIsInitialLoading(false);
       }
     };
