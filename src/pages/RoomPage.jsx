@@ -44,7 +44,6 @@ export default function RoomPage() {
 
   const { roomId, joinCode, participants, currentTurnId } = useRoomStore();
   
-  // ✨ connected 상태를 추가로 가져옵니다.
   const { start, stop, toggleMute, muted, connected, volumes = {} } = useVoice();
 
   const [showSongPicker, setShowSongPicker] = useState(false);
@@ -59,6 +58,10 @@ export default function RoomPage() {
   const [selectedFriends, setSelectedFriends] = useState([]);
 
   const [isMicOn, setIsMicOn] = useState(!muted);
+  
+  // ✨ TTS 온/오프 상태 관리 및 소켓 리스너용 Ref
+  const [isTtsOn, setIsTtsOn] = useState(true);
+  const isTtsOnRef = useRef(isTtsOn);
   
   const [playingVideo, setPlayingVideo] = useState(null);
   const [isVideoPlaying, setIsVideoPlaying] = useState(false); 
@@ -75,13 +78,16 @@ export default function RoomPage() {
     userRef.current = user;
   }, [playingVideo, user]);
 
+  // ✨ TTS 설정이 바뀔 때마다 Ref 업데이트 (소켓 리스너에서 최신값 참조용)
+  useEffect(() => {
+    isTtsOnRef.current = isTtsOn;
+  }, [isTtsOn]);
+
   const isMyTurn = currentTurnId ? String(user?.id).trim() === String(currentTurnId).trim() : false;
   const amISinging = playingVideo?.singerId ? String(user?.id).trim() === String(playingVideo.singerId).trim() : false;
 
-  // ✨ 마이크 토글 로직 강화 (예외 처리 및 자동 복구)
   const handleMicToggle = async () => {
     try {
-      // 아고라 연결 자체가 안 된 상태(최초 에러 등)라면 재연결 우선 시도
       if (!connected) {
         await start(roomId);
         setIsMicOn(true);
@@ -89,7 +95,6 @@ export default function RoomPage() {
         return;
       }
 
-      // 정상 연결 상태면 단순 토글 수행
       if (toggleMute) await toggleMute(); 
       setIsMicOn((prev) => {
         const newState = !prev;
@@ -98,7 +103,6 @@ export default function RoomPage() {
       }); 
     } catch (err) {
       console.error("🚨 마이크 전환 중 에러 발생 (자동 꺼짐 전환):", err);
-      // 에러 시 강제로 내 UI를 끄고 타인에게도 꺼짐 상태 전파
       setIsMicOn(false);
       getSocket()?.emit('voice:mute_toggle', { isMicOn: false });
       alert("마이크 연결에 문제가 발생했습니다. 권한을 확인해주세요.");
@@ -122,25 +126,20 @@ export default function RoomPage() {
         
         setIsMicOn(true);
         
-        // ✨ 서버에 방 참여가 완전히 등록될 시간을 벌어준 뒤 상태 전파 (타이밍 이슈 해결)
         setTimeout(() => {
           getSocket()?.emit('voice:mute_toggle', { isMicOn: true });
         }, 500);
         
         setIsInitialLoading(false);
       } catch (err) {
-        console.error("🚨 최초 마이크 연결 실패 (권한 거부 또는 서버 에러):", err);
-        
+        console.error("🚨 최초 마이크 연결 실패:", err);
         setIsMicOn(false);
-        
         await refreshFriends();
         getSocket()?.emit('room:request_state', { roomId });
         
-        // ✨ 에러 발생에 의한 꺼짐 상태도 확실하게 전파
         setTimeout(() => {
           getSocket()?.emit('voice:mute_toggle', { isMicOn: false });
         }, 500);
-        
         setIsInitialLoading(false);
       }
     };
@@ -266,6 +265,17 @@ export default function RoomPage() {
       }));
     };
 
+    // ✨ TTS (시스템 안내 방송) 수신 로직
+    const onRoomAnnounce = (data) => {
+      console.log('📢 시스템 공지:', data.message);
+      
+      // 유저가 TTS 기능을 켜놓았고, 음성 데이터가 존재할 때만 재생
+      if (isTtsOnRef.current && data.audioData) {
+        const audio = new Audio(`data:audio/mp3;base64,${data.audioData}`);
+        audio.play().catch(e => console.error("TTS 오디오 자동재생 실패 (브라우저 정책):", e));
+      }
+    };
+
     socket.on('room:state', onRoomState);
     socket.on('friend:update', onFriendUpdate);
     socket.on('user:reaction', onReaction);
@@ -274,6 +284,7 @@ export default function RoomPage() {
     socket.on('song:request_sync', onRequestSync);
     socket.on('song:receive_sync', onReceiveSync);
     socket.on('voice:mute_status', onMuteStatus);
+    socket.on('room:announce', onRoomAnnounce); // 리스너 추가
 
     return () => { 
       socket.off('room:state', onRoomState);
@@ -284,6 +295,7 @@ export default function RoomPage() {
       socket.off('song:request_sync', onRequestSync);
       socket.off('song:receive_sync', onReceiveSync);
       socket.off('voice:mute_status', onMuteStatus); 
+      socket.off('room:announce', onRoomAnnounce); // 정리
     };
   }, [roomId, navigate, start, refreshFriends]); 
 
@@ -536,12 +548,22 @@ export default function RoomPage() {
         <button onClick={handleLeave} style={styles.leaveBtn}>나가기</button>
         <span style={styles.roomCode}>코드: {joinCode || '...'}</span>
         
-        <button 
-          onClick={handleMicToggle} 
-          style={{...styles.muteBtn, background: isMicOn ? '#ff4b2b' : '#30475e'}}
-        >
-          {isMicOn ? '🎤 켜짐' : '🔇 꺼짐'}
-        </button>
+        {/* ✨ 우측에 TTS 버튼과 마이크 버튼을 함께 배치 */}
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button 
+            onClick={() => setIsTtsOn(!isTtsOn)}
+            style={{...styles.muteBtn, background: isTtsOn ? '#4ade80' : '#30475e', color: isTtsOn ? '#1a1a2e' : '#fff'}}
+          >
+            {isTtsOn ? '🔊 낭독 켜짐' : '🔈 낭독 꺼짐'}
+          </button>
+          
+          <button 
+            onClick={handleMicToggle} 
+            style={{...styles.muteBtn, background: isMicOn ? '#ff4b2b' : '#30475e'}}
+          >
+            {isMicOn ? '🎤 마이크 켜짐' : '🔇 마이크 꺼짐'}
+          </button>
+        </div>
       </header>
 
       <div style={styles.mainDisplay}>
