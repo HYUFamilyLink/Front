@@ -26,7 +26,7 @@ export default function AuthPage() {
   async function handleSubmit(e) {
     if (e) e.preventDefault();
     if (birthdate.length !== 4) {
-      setError('생년월일 4자리를 모두 눌러주세요.');
+      setError('전화번호 뒷자리 4자리를 모두 눌러주세요.');
       return;
     }
 
@@ -50,7 +50,7 @@ export default function AuthPage() {
       // 상태 관리 스토어에 유저 정보(profileImage 포함) 저장
       setAuth(data.user, data.token);
       
-      // ✨ [추가/수정] 프로필 이미지가 미설정(0 또는 null) 상태인지 확인
+      // 프로필 이미지가 미설정(0 또는 null) 상태인지 확인
       const hasNoProfile = !data.user.profileImage || data.user.profileImage === 0;
 
       if (hasNoProfile) {
@@ -100,7 +100,7 @@ export default function AuthPage() {
         </div>
 
         <div style={styles.inputSection}>
-          <label style={styles.label}>2. 생년월일 (4자리)</label>
+          <label style={styles.label}>2. 전화번호 뒷번호 (4자리)</label>
           <div style={styles.pinDisplay}>
             {[0, 1, 2, 3].map((i) => (
               <div key={i} style={styles.pinDot}>
