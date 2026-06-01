@@ -66,7 +66,7 @@ export default function RoomPage() {
   const [playingVideo, setPlayingVideo] = useState(null);
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
 
-  // ✨ [추가됨] 아이폰 등에서 자동재생 차단 상태 감지
+  // ✨ 아이폰 등에서 자동재생 차단 상태 감지
   const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false);
 
   const [ytVolume, setYtVolume] = useState(80);
@@ -500,6 +500,16 @@ export default function RoomPage() {
 
   const currentTurnUser = participants.find(p => String(p.id).trim() === String(currentTurnId).trim());
 
+  // ✨ [추가됨] 참가자 목록 정렬: '현재 노래하는 사람'을 가장 위로 올리고, 나머지는 원래 순서(들어온 순서) 유지
+  const sortedParticipants = [...participants].sort((a, b) => {
+    const isATurn = currentTurnId ? String(a.id).trim() === String(currentTurnId).trim() : false;
+    const isBTurn = currentTurnId ? String(b.id).trim() === String(currentTurnId).trim() : false;
+
+    if (isATurn) return -1;
+    if (isBTurn) return 1;
+    return 0; // 서버가 내려준 기본 배열 순서 유지 (늦게 온 사람은 자연스럽게 뒤로 감)
+  });
+
   return (
     <div style={styles.container}>
       <style>{`
@@ -578,8 +588,10 @@ export default function RoomPage() {
         </div>
       </header>
 
-      {/* ✨ 중앙 컨텐츠 영역을 감싸는 스크롤 래퍼 추가 (하단 푸터 영역을 분리) */}
+      {/* ✨ 화면 내부 스크롤을 담당하는 메인 래퍼 */}
       <div className="custom-scroll" style={styles.contentWrapper}>
+
+        {/* 영상창 영역 */}
         <div style={styles.mainDisplay}>
           {playingVideo ? (
             <div style={{...styles.songCard, position: 'relative' }}>
@@ -635,6 +647,61 @@ export default function RoomPage() {
           )}
         </div>
 
+        {/* ✨ 액션 영역 (이모지 & 노래고르기 등) - 영상 바로 밑에 배치 */}
+        <div style={styles.actionSection}>
+          <div style={styles.emojiRow}>
+            {REACTION_DATA.map(reaction => (
+              <button key={reaction.id} onClick={() => sendEmoji(reaction.id)} style={styles.emojiBtn}>
+                {reaction.icon}
+              </button>
+            ))}
+          </div>
+
+          {amISinging ? (
+            <button
+              onClick={handleSkipTurn}
+              style={{
+                ...styles.addSongBtn,
+                background: '#f9d423',
+                color:'#1a1a2e',
+                cursor: 'pointer'
+              }}
+            >
+              차례 넘기기
+            </button>
+          ) : isMyTurn ? (
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                onClick={() => setShowSongPicker(true)}
+                style={{ ...styles.addSongBtn, flex: 3, background: '#e94560', cursor: 'pointer' }}
+              >
+                🎶 노래 고르기
+              </button>
+              <button
+                onClick={handleSkipTurn}
+                disabled={participants.length <= 1}
+                style={{
+                  ...styles.smallPassBtn,
+                  background: participants.length <= 1 ? '#444' : '#f9d423',
+                  color: participants.length <= 1 ? '#888' : '#fff',
+                  cursor: participants.length <= 1 ? 'not-allowed' : 'pointer',
+                  opacity: participants.length <= 1 ? 0.6 : 1
+                }}
+              >
+                넘기기
+              </button>
+            </div>
+          ) : (
+            <button
+              style={{ ...styles.addSongBtn, background: '#444', cursor: 'not-allowed' }}
+              disabled
+            >
+              차례 대기
+            </button>
+          )}
+        </div>
+
+        {/* ✨ 참가자 영역 (맨 아래 배치) */}
         <div style={styles.participantSection}>
           <div style={styles.participantHeader}>
             <h3 style={styles.subTitle}>참여자 ({participants.length}/6명)</h3>
@@ -648,7 +715,8 @@ export default function RoomPage() {
           </div>
 
           <div className="custom-scroll" style={styles.userList}>
-            {participants.map((p) => {
+            {/* ✨ 정렬된 배열(sortedParticipants)을 사용하여 렌더링 */}
+            {sortedParticipants.map((p) => {
               const isMe = String(p.id).trim() === String(user?.id).trim();
               const isThisUserTurn = currentTurnId ? String(p.id).trim() === String(currentTurnId).trim() : false;
 
@@ -720,61 +788,7 @@ export default function RoomPage() {
             })}
           </div>
         </div>
-      </div> {/* contentWrapper 끝 */}
-
-      {/* ✨ 하단 고정 사이드바(Footer) - 항상 노출 */}
-      <footer style={styles.footer}>
-        <div style={styles.emojiRow}>
-          {REACTION_DATA.map(reaction => (
-            <button key={reaction.id} onClick={() => sendEmoji(reaction.id)} style={styles.emojiBtn}>
-              {reaction.icon}
-            </button>
-          ))}
-        </div>
-
-        {amISinging ? (
-          <button
-            onClick={handleSkipTurn}
-            style={{
-              ...styles.addSongBtn,
-              background: '#f9d423',
-              color:'#1a1a2e',
-              cursor: 'pointer'
-            }}
-          >
-            차례 넘기기
-          </button>
-        ) : isMyTurn ? (
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button
-              onClick={() => setShowSongPicker(true)}
-              style={{ ...styles.addSongBtn, flex: 3, background: '#e94560', cursor: 'pointer' }}
-            >
-              🎶 노래 고르기
-            </button>
-            <button
-              onClick={handleSkipTurn}
-              disabled={participants.length <= 1}
-              style={{
-                ...styles.smallPassBtn,
-                background: participants.length <= 1 ? '#444' : '#f9d423',
-                color: participants.length <= 1 ? '#888' : '#fff',
-                cursor: participants.length <= 1 ? 'not-allowed' : 'pointer',
-                opacity: participants.length <= 1 ? 0.6 : 1
-              }}
-            >
-              넘기기
-            </button>
-          </div>
-        ) : (
-          <button
-            style={{ ...styles.addSongBtn, background: '#444', cursor: 'not-allowed' }}
-            disabled
-          >
-            차례 대기
-          </button>
-        )}
-      </footer>
+      </div>
 
       {showSongPicker && (
         <div style={styles.modalOverlay} onClick={(e) => handleModalOutsideClick(e, setShowSongPicker)}>
@@ -868,7 +882,8 @@ export default function RoomPage() {
 }
 
 const styles = {
-  container: { height: '100vh', display: 'flex', flexDirection: 'column', background: '#1a1a2e', color: '#fff', padding: 'clamp(1rem, 4vw, 2rem)', position: 'relative', overflow: 'hidden', boxSizing: 'border-box' },
+  // ✨ 100dvh를 사용하여 스마트폰 브라우저 상하단 툴바 무시 및 픽셀 깨짐 해결
+  container: { height: '100dvh', display: 'flex', flexDirection: 'column', background: '#1a1a2e', color: '#fff', padding: 'clamp(1rem, 4vw, 2rem)', position: 'relative', overflow: 'hidden', boxSizing: 'border-box' },
   reactionLayer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', zIndex: 100 },
   reactionBubble: { position: 'absolute', bottom: '15vh', display: 'flex', flexDirection: 'column', alignItems: 'center', animation: 'bubbleUp 4s ease-out forwards' },
   reactionUser: { background: 'rgba(233, 69, 96, 0.9)', padding: '0.25rem 0.75rem', borderRadius: '1rem', fontSize: 'clamp(0.8rem, 3vw, 1rem)', fontWeight: 'bold', marginBottom: '0.25rem', whiteSpace: 'nowrap', boxShadow: '0 4px 10px rgba(0,0,0,0.3)' },
@@ -879,7 +894,7 @@ const styles = {
   roomCode: { fontSize: 'clamp(1.1rem, 4vw, 1.5rem)', fontWeight: 'bold', color: '#e94560', whiteSpace: 'nowrap' },
   muteBtn: { padding: '0.5rem 1rem', borderRadius: '0.75rem', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 'clamp(0.9rem, 3vw, 1.1rem)', fontWeight: 'bold', transition: '0.3s', whiteSpace: 'nowrap' },
 
-  // ✨ 영상 + 참여자 목록을 하나로 묶어 이 내부에서만 스크롤 되도록 하는 컨테이너 추가
+  // ✨ 영상 + 버튼 + 참가자를 묶어 전체적인 자연스러운 세로 스크롤 허용
   contentWrapper: {
     flex: 1,
     overflowY: 'auto',
@@ -887,125 +902,66 @@ const styles = {
     width: '100%',
     display: 'flex',
     flexDirection: 'column',
-    paddingRight: '0.5rem' // 스크롤바 겹침 방지 여백
+    paddingRight: '0.5rem'
   },
 
-  // ✨ 영상 영역이 스크롤 안에서 너무 찌그러지지 않도록 minHeight 보장
-  mainDisplay: { flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '30vh', width: '100%', marginBottom: '1rem' },
+  // ✨ 영상 영역
+  mainDisplay: { flexShrink: 0, display: 'flex', justifyContent: 'center', width: '100%', marginBottom: '1rem' },
 
   songCard: {
     display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
     textAlign: 'center', padding: 'clamp(0.75rem, 2vw, 1.25rem)', background: 'rgba(233,69,96,0.1)',
     borderRadius: '1.5rem', border: '2px solid #e94560', width: '100%', maxWidth: '52rem',
-    height: '100%', minHeight: '250px', maxHeight: '55vh', boxSizing: 'border-box'
+    minHeight: '250px', boxSizing: 'border-box'
   },
 
-  tagBadge: {
-    background: '#e94560',
-    color: '#fff',
-    fontSize: '0.75rem',
-    padding: '2px 6px',
-    borderRadius: '4px',
-    fontWeight: 'bold',
-    display: 'inline-block',
-    verticalAlign: 'middle'
-  },
-  loadingOverlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    background: 'rgba(26, 26, 46, 0.85)', pointerEvents: 'none',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-    zIndex: 10, borderRadius: '1.5rem', color: '#fff', fontWeight: 'bold'
-  },
-  loadingSpinner: {
-    width: '40px', height: '40px', border: '4px solid rgba(255,255,255,0.3)',
-    borderTop: '4px solid #e94560', borderRadius: '50%',
-    animation: 'spin 1s linear infinite', marginBottom: '10px'
-  },
+  tagBadge: { background: '#e94560', color: '#fff', fontSize: '0.75rem', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold', display: 'inline-block', verticalAlign: 'middle' },
+  loadingOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(26, 26, 46, 0.85)', pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 10, borderRadius: '1.5rem', color: '#fff', fontWeight: 'bold' },
+  loadingSpinner: { width: '40px', height: '40px', border: '4px solid rgba(255,255,255,0.3)', borderTop: '4px solid #e94560', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '10px' },
 
-  volumeControlContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '0.5rem',
-    marginTop: '0.5rem',
-    width: '80%',
-    margin: '0.5rem auto 0',
-  },
-
+  volumeControlContainer: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginTop: '0.5rem', width: '80%', margin: '0.5rem auto 0' },
   songTitle: { fontSize: 'clamp(1rem, 3.5vw, 1.25rem)', margin: '0 0 0.25rem', wordBreak: 'keep-all', color: '#fff' },
   songArtist: { fontSize: 'clamp(0.85rem, 3.5vw, 1rem)', color: '#aaa', margin: 0 },
   emptyCard: { fontSize: 'clamp(1rem, 4vw, 1.25rem)', color: '#666', textAlign: 'center' },
 
-  participantSection: { flex: '0 0 auto', marginBottom: '1rem' },
+  // ✨ 영상창 바로 밑에 붙는 액션 구역 (이모지 & 버튼)
+  actionSection: {
+    display: 'flex', flexDirection: 'column', gap: '0.75rem', width: '100%', maxWidth: '52rem',
+    margin: '0 auto 1rem auto', flexShrink: 0
+  },
+  emojiRow: { display: 'flex', justifyContent: 'space-between', padding: '0 1rem' },
+  emojiBtn: { fontSize: 'clamp(1.8rem, 7vw, 2.2rem)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 },
+  addSongBtn: { padding: '0.75rem', borderRadius: '0.75rem', color: '#fff', fontSize: 'clamp(1.1rem, 4vw, 1.25rem)', fontWeight: 'bold', border: 'none', transition: '0.3s' },
+  smallPassBtn: { flex: 1, padding: '0.75rem 0.5rem', borderRadius: '0.75rem', background: '#30475e', color: '#fff', fontSize: 'clamp(0.85rem, 3vw, 1rem)', fontWeight: 'bold', border: 'none', cursor: 'pointer', transition: '0.3s', whiteSpace: 'nowrap' },
+
+  // ✨ 가장 아래에 남은 공간을 채우는 참가자 섹션
+  participantSection: { flexShrink: 0, width: '100%', maxWidth: '52rem', margin: '0 auto 1rem auto' },
   participantHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' },
   subTitle: { fontSize: 'clamp(1rem, 3.5vw, 1.15rem)', color: '#e94560', margin: 0 },
   inviteBtn: { padding: '0.4rem 0.6rem', background: 'transparent', border: '1px solid #e94560', color: '#e94560', borderRadius: '0.5rem', fontWeight: 'bold', cursor: 'pointer', fontSize: 'clamp(0.8rem, 2.5vw, 0.9rem)' },
 
-  userList: { display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '12rem', overflowY: 'auto', paddingRight: '0.5rem' },
+  userList: { display: 'flex', flexDirection: 'column', gap: '0.4rem' },
   userItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '0.6rem 0.8rem', borderRadius: '0.75rem' },
   userInfo: { display: 'flex', alignItems: 'center', gap: '0.75rem' },
   avatar: { width: 'clamp(2rem, 8vw, 2.5rem)', height: 'clamp(2rem, 8vw, 2.5rem)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'clamp(1rem, 3.5vw, 1.25rem)', fontWeight: 'bold', color: '#fff' },
 
-  micStatusBox: {
-    width: '24px',
-    height: '24px',
-    borderRadius: '50%',
-    background: 'rgba(0,0,0,0.3)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  activeMicDot: {
-    width: '10px',
-    height: '10px',
-    borderRadius: '50%',
-    background: '#4ade80',
-    boxShadow: '0 0 6px #4ade80',
-    transition: 'transform 0.1s ease-out, opacity 0.1s ease-out'
-  },
+  micStatusBox: { width: '24px', height: '24px', borderRadius: '50%', background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  activeMicDot: { width: '10px', height: '10px', borderRadius: '50%', background: '#4ade80', boxShadow: '0 0 6px #4ade80', transition: 'transform 0.1s ease-out, opacity 0.1s ease-out' },
 
   userName: { fontSize: 'clamp(0.9rem, 3.5vw, 1rem)' },
   friendBtn: { padding: '0.4rem 0.6rem', borderRadius: '0.5rem', border: 'none', background: '#30475e', color: '#fff', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s ease', fontSize: 'clamp(0.8rem, 2.5vw, 0.9rem)', whiteSpace: 'nowrap' },
   receivedThumpEffect: { background: 'linear-gradient(45deg, #f9d423, #ff4e50)', color: '#1a1a2e', animation: 'heartbeat 1.2s infinite ease-in-out, pulseGlow 1.2s infinite' },
   alreadyFriend: { background: 'transparent', border: '2px solid #e94560', color: '#e94560' },
 
-  // ✨ 하단 Footer가 절대 찌그러지지 않고 밑바닥에 고정되도록 flexShrink: 0 추가
-  footer: {
-    flexShrink: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '0.75rem',
-    zIndex: 10,
-    paddingTop: '1rem', // 스크롤 영역과 시각적인 분리를 위한 위쪽 여백
-    borderTop: '1px solid rgba(255,255,255,0.05)' // 은은한 경계선
-  },
-
-  emojiRow: { display: 'flex', justifyContent: 'space-between' },
-  emojiBtn: { fontSize: 'clamp(1.8rem, 7vw, 2.2rem)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 },
-  
-  addSongBtn: { padding: '0.75rem', borderRadius: '0.75rem', color: '#fff', fontSize: 'clamp(1.1rem, 4vw, 1.25rem)', fontWeight: 'bold', border: 'none', transition: '0.3s' },
-  
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', zIndex: 200, cursor: 'pointer' },
   modal: { background: '#1a1a2e', width: '100%', maxWidth: '28rem', borderRadius: '1.25rem', padding: 'clamp(1.25rem, 6vw, 2rem)', display: 'flex', flexDirection: 'column', border: '1px solid #333', boxSizing: 'border-box', cursor: 'default' },
   modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' },
   closeBtn: { background: 'transparent', color: '#fff', border: 'none', fontSize: '1.5rem', cursor: 'pointer' },
-  
+
   searchContainer: { display: 'flex', gap: '0.5rem', marginBottom: '1rem', width: '100%' },
   searchInput: { flex: 1, padding: '1rem', borderRadius: '0.75rem', border: 'none', background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 'clamp(1rem, 4vw, 1.125rem)', boxSizing: 'border-box', outline: 'none', minWidth: 0 },
   searchSubmitBtn: { padding: '0 1.25rem', borderRadius: '0.75rem', border: 'none', background: '#e94560', color: '#fff', fontSize: '1rem', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' },
-  smallPassBtn: {
-    flex: 1,
-    padding: '0.75rem 0.5rem',
-    borderRadius: '0.75rem',
-    background: '#30475e', 
-    color: '#fff',
-    fontSize: 'clamp(0.85rem, 3vw, 1rem)', 
-    fontWeight: 'bold',
-    border: 'none',
-    cursor: 'pointer',
-    transition: '0.3s',
-    whiteSpace: 'nowrap'
-  },
+
   songList: { flex: 1, overflowY: 'auto', maxHeight: '40vh', display: 'flex', flexDirection: 'column', gap: '0.5rem', paddingRight: '0.5rem' },
   songItem: { padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '0.75rem', cursor: 'pointer', transition: 'background 0.2s ease' },
   
