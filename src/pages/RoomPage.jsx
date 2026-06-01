@@ -44,12 +44,13 @@ export default function RoomPage() {
 
   const { roomId, joinCode, participants, currentTurnId } = useRoomStore();
   
+  // ✨ connected 상태를 추가로 가져옵니다.
   const { start, stop, toggleMute, muted, connected, volumes = {} } = useVoice();
 
   const [showSongPicker, setShowSongPicker] = useState(false);
   const [songSearch, setSongSearch] = useState('');
   const [songs, setSongs] = useState([]);
-  
+
   const [activeReactions, setActiveReactions] = useState([]);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const isLeaving = useRef(false);
@@ -58,12 +59,12 @@ export default function RoomPage() {
   const [selectedFriends, setSelectedFriends] = useState([]);
 
   const [isMicOn, setIsMicOn] = useState(!muted);
-  
+
   const [playingVideo, setPlayingVideo] = useState(null);
-  const [isVideoPlaying, setIsVideoPlaying] = useState(false); 
-  
+  const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+
   // ✨ [추가됨] 아이폰 등에서 자동재생이 차단되었는지 감지하는 상태
-  const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false); 
+  const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false);
 
   const [ytVolume, setYtVolume] = useState(80);
 
@@ -80,8 +81,10 @@ export default function RoomPage() {
   const isMyTurn = currentTurnId ? String(user?.id).trim() === String(currentTurnId).trim() : false;
   const amISinging = playingVideo?.singerId ? String(user?.id).trim() === String(playingVideo.singerId).trim() : false;
 
+  // ✨ 마이크 토글 로직 강화 (예외 처리 및 자동 복구)
   const handleMicToggle = async () => {
     try {
+      // 아고라 연결 자체가 안 된 상태(최초 에러 등)라면 재연결 우선 시도
       if (!connected) {
         await start(roomId);
         setIsMicOn(true);
@@ -89,14 +92,16 @@ export default function RoomPage() {
         return;
       }
 
-      if (toggleMute) await toggleMute(); 
+      // 정상 연결 상태면 단순 토글 수행
+      if (toggleMute) await toggleMute();
       setIsMicOn((prev) => {
         const newState = !prev;
         getSocket()?.emit('voice:mute_toggle', { isMicOn: newState });
         return newState;
-      }); 
+      });
     } catch (err) {
       console.error("🚨 마이크 전환 중 에러 발생 (자동 꺼짐 전환):", err);
+      // 에러 시 강제로 내 UI를 끄고 타인에게도 꺼짐 상태 전파
       setIsMicOn(false);
       getSocket()?.emit('voice:mute_toggle', { isMicOn: false });
       alert("마이크 연결에 문제가 발생했습니다. 권한을 확인해주세요.");
@@ -105,36 +110,40 @@ export default function RoomPage() {
 
   useEffect(() => {
     const socket = getSocket();
-    
+
     if (!socket || !roomId || isLeaving.current) {
       useRoomStore.setState({ roomId: null, joinCode: null, participants: [], currentSong: null, currentTurnId: null });
       navigate('/', { replace: true });
-      return; 
+      return;
     }
 
     const initData = async () => {
       try {
         await start(roomId);
-        await refreshFriends(); 
+        await refreshFriends();
         getSocket()?.emit('room:request_state', { roomId });
-        
+
         setIsMicOn(true);
-        
+
+        // ✨ 서버에 방 참여가 완전히 등록될 시간을 벌어준 뒤 상태 전파 (타이밍 이슈 해결)
         setTimeout(() => {
           getSocket()?.emit('voice:mute_toggle', { isMicOn: true });
         }, 500);
-        
+
         setIsInitialLoading(false);
       } catch (err) {
         console.error("🚨 최초 마이크 연결 실패 (권한 거부 또는 서버 에러):", err);
+
         setIsMicOn(false);
+
         await refreshFriends();
         getSocket()?.emit('room:request_state', { roomId });
-        
+
+        // ✨ 에러 발생에 의한 꺼짐 상태도 확실하게 전파
         setTimeout(() => {
           getSocket()?.emit('voice:mute_toggle', { isMicOn: false });
         }, 500);
-        
+
         setIsInitialLoading(false);
       }
     };
@@ -143,7 +152,7 @@ export default function RoomPage() {
     const onRoomState = async (data) => {
       if (isLeaving.current) return;
       await refreshFriends();
-      
+
       useRoomStore.setState((state) => {
         const rawParticipants = data.participants || state.participants;
         const mergedParticipants = rawParticipants.map(newP => {
@@ -179,15 +188,15 @@ export default function RoomPage() {
     const onFriendUpdate = (payload) => {
       if (isLeaving.current) return;
       if (!payload || !payload.fromId) {
-        refreshFriends(); 
+        refreshFriends();
         return;
       }
       useAuthStore.setState((prev) => {
         const existingData = prev.friendStatuses[payload.fromId] || {};
         return {
-          friendStatuses: { 
-            ...prev.friendStatuses, 
-            [payload.fromId]: { ...existingData, status: payload.status } 
+          friendStatuses: {
+            ...prev.friendStatuses,
+            [payload.fromId]: { ...existingData, status: payload.status }
           }
         };
       });
@@ -195,7 +204,7 @@ export default function RoomPage() {
 
     const onReaction = (data) => {
       if (isLeaving.current) return;
-      
+
       playReactionSound(data.reactionId || data.emoji);
 
       const reactionObj = REACTION_DATA.find(r => r.id === data.reactionId || r.icon === data.emoji);
@@ -209,9 +218,9 @@ export default function RoomPage() {
     const onSongPlay = (data) => {
       if (!isLeaving.current) {
         setPlayingVideo(data);
-        setIsVideoPlaying(false); 
+        setIsVideoPlaying(false);
         setShowSongPicker(false);
-        setIsAutoplayBlocked(false); // ✨ [추가됨] 새 노래 재생 시 차단 상태 초기화
+        setIsAutoplayBlocked(false); // ✨ 곡이 바뀔 때 차단 상태 초기화
       }
     };
 
@@ -223,7 +232,7 @@ export default function RoomPage() {
       if (!isLeaving.current) {
         setPlayingVideo(null);
         setIsVideoPlaying(false);
-        setIsAutoplayBlocked(false); // ✨ [추가됨] 노래 정지 시 차단 상태 초기화
+        setIsAutoplayBlocked(false); // ✨ 곡 정지 시 차단 상태 초기화
       }
     };
 
@@ -265,27 +274,27 @@ export default function RoomPage() {
     socket.on('room:state', onRoomState);
     socket.on('friend:update', onFriendUpdate);
     socket.on('user:reaction', onReaction);
-    socket.on('song:play', onSongPlay); 
-    socket.on('song:stop', onSongStop); 
+    socket.on('song:play', onSongPlay);
+    socket.on('song:stop', onSongStop);
     socket.on('song:request_sync', onRequestSync);
     socket.on('song:receive_sync', onReceiveSync);
     socket.on('voice:mute_status', onMuteStatus);
 
-    return () => { 
+    return () => {
       socket.off('room:state', onRoomState);
-      socket.off('friend:update', onFriendUpdate); 
+      socket.off('friend:update', onFriendUpdate);
       socket.off('user:reaction', onReaction);
       socket.off('song:play', onSongPlay);
       socket.off('song:stop', onSongStop);
       socket.off('song:request_sync', onRequestSync);
       socket.off('song:receive_sync', onReceiveSync);
-      socket.off('voice:mute_status', onMuteStatus); 
+      socket.off('voice:mute_status', onMuteStatus);
     };
-  }, [roomId, navigate, start, refreshFriends]); 
+  }, [roomId, navigate, start, refreshFriends]);
 
   const onPlayerReady = (event) => {
     ytPlayerRef.current = event.target;
-    
+
     if (typeof ytPlayerRef.current.setVolume === 'function') {
       ytPlayerRef.current.setVolume(ytVolume);
     }
@@ -303,52 +312,28 @@ export default function RoomPage() {
       event.target.seekTo(seekTo, true);
     }
 
-    // ✨ [추가/수정됨] iOS 자동재생 대응 로직
-    // 일단 재생을 강제 시도합니다.
+    // ✨ 일단 강제 재생을 시도합니다
     event.target.playVideo();
-    
-    // 1초 뒤에도 재생 상태(1)나 버퍼링(3)으로 넘어가지 않았다면 자동재생이 막힌 것으로 간주합니다.
+
+    // ✨ 1.5초 후에도 재생 상태가 아니라면 아이폰 등에서 자동재생이 차단된 것으로 판단
     setTimeout(() => {
       if (ytPlayerRef.current && typeof ytPlayerRef.current.getPlayerState === 'function') {
         const state = ytPlayerRef.current.getPlayerState();
         if (state !== 1 && state !== 3) {
-          console.log("🚨 자동재생 차단 감지됨. 터치 오버레이를 표시합니다.");
-          setIsAutoplayBlocked(true);
+          console.log("🚨 자동재생 차단 감지됨. 터치 가능하도록 잠금을 풉니다.");
+          setIsAutoplayBlocked(true); // 차단 감지!
         }
       }
-    }, 1000);
+    }, 1500);
 
     getSocket()?.emit('song:request_sync');
-  };
-
-  // ✨ [추가됨] 화면 터치 시 수동으로 재생 및 동기화하는 함수
-  const handleForcePlay = () => {
-    setIsAutoplayBlocked(false);
-    if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === 'function') {
-      ytPlayerRef.current.playVideo();
-      
-      const currentVideo = playingVideoRef.current;
-      const currentUser = userRef.current;
-      
-      if (currentVideo && currentUser) {
-        if (String(currentUser.id).trim() === String(currentVideo.singerId).trim()) {
-          // 내가 부르는 사람이면 시작 시간을 타인에게 뿌림
-          ytPlayerRef.current.getCurrentTime().then(time => {
-            getSocket()?.emit('song:send_sync', { time });
-          });
-        } else {
-          // 리스너라면 현재 방장의 시간을 요청하여 점프
-          getSocket()?.emit('song:request_sync');
-        }
-      }
-    }
   };
 
   const onPlayerStateChange = (event) => {
     const PLAYING = 1;
     const ENDED = 0;
     const BUFFERING = 3;
-    const CUED = 5; 
+    const CUED = 5;
 
     const currentVideo = playingVideoRef.current;
     const currentUser = userRef.current;
@@ -357,8 +342,9 @@ export default function RoomPage() {
     const amISingingNow = String(currentUser.id).trim() === String(currentVideo.singerId).trim();
 
     if (event.data === PLAYING) {
-      setIsAutoplayBlocked(false); // ✨ [추가됨] 재생 성공 시 차단 UI 확실히 제거
-      
+      // ✨ 재생이 시작되면 무조건 상호작용을 다시 차단합니다 (원상 복구)
+      setIsAutoplayBlocked(false);
+
       if (amISingingNow) {
         setIsVideoPlaying(true);
         event.target.getCurrentTime().then(time => {
@@ -377,6 +363,7 @@ export default function RoomPage() {
         getSocket()?.emit('song:request_sync');
       }
     }
+
     else if (event.data === BUFFERING) {
       setIsVideoPlaying(false);
       if (amISingingNow && syncIntervalRef.current) {
@@ -384,6 +371,7 @@ export default function RoomPage() {
         syncIntervalRef.current = null;
       }
     }
+
     else if (event.data === ENDED) {
       if (syncIntervalRef.current) {
         clearInterval(syncIntervalRef.current);
@@ -399,33 +387,33 @@ export default function RoomPage() {
 
   const handleLeave = async () => {
     if (isLeaving.current) return;
-    isLeaving.current = true; 
+    isLeaving.current = true;
 
     const socket = getSocket();
-    
+
     const currentVideo = playingVideoRef.current;
     const currentUser = userRef.current;
     if (currentVideo && currentUser && String(currentUser.id).trim() === String(currentVideo.singerId).trim()) {
       socket?.emit('song:end');
     }
-    
+
     socket?.off('room:state');
-    
+
     useRoomStore.setState({ roomId: null, joinCode: null, participants: [], currentSong: null, currentTurnId: null });
     navigate('/', { replace: true });
 
-    try { 
-      socket?.emit('room:leave'); 
-      await stop(); 
+    try {
+      socket?.emit('room:leave');
+      await stop();
     } catch (err) {}
   };
 
   const handleFriendAction = (targetId) => {
     const socket = getSocket();
     const statusData = friendStatuses[targetId];
-    const current = statusData?.status || statusData; 
+    const current = statusData?.status || statusData;
     const event = current === 'received' ? 'friend:accept' : 'friend:request';
-    
+
     useAuthStore.setState((prev) => ({
       friendStatuses: {
         ...prev.friendStatuses,
@@ -441,7 +429,7 @@ export default function RoomPage() {
 
   const handleSendInvites = () => {
     if (selectedFriends.length === 0) return;
-    getSocket()?.emit('room:send_invites', { 
+    getSocket()?.emit('room:send_invites', {
       invitedFriends: selectedFriends,
       roomId: roomId,
       joinCode: joinCode,
@@ -459,38 +447,38 @@ export default function RoomPage() {
     }
   };
 
-  const invitableFriends = friends?.filter(f => 
+  const invitableFriends = friends?.filter(f =>
     !participants.some(p => String(p.id).trim() === String(f.id).trim())
   ) || [];
 
-  const sendEmoji = (reactionId) => { 
+  const sendEmoji = (reactionId) => {
     const reactionObj = REACTION_DATA.find(r => r.id === reactionId);
-    getSocket()?.emit('user:reaction', { 
-      reactionId: reactionId, 
+    getSocket()?.emit('user:reaction', {
+      reactionId: reactionId,
       emoji: reactionObj ? reactionObj.icon : '✨'
-    }); 
+    });
   };
-  
+
   const executeSearch = async () => {
     if (!songSearch.trim()) return;
-    try { 
-      const data = await api.get(`/api/songs?q=${encodeURIComponent(songSearch)}`); 
-      setSongs(data || []); 
+    try {
+      const data = await api.get(`/api/songs?q=${encodeURIComponent(songSearch)}`);
+      setSongs(data || []);
     } catch (err) {
       console.error("검색 오류:", err);
     }
   };
-  
-  const reserveSong = (song) => { 
-    getSocket()?.emit('song:select', { videoId: song.video_id || song.id, title: song.title, artist: song.artist }); 
-    setShowSongPicker(false); 
-    setSongSearch(''); 
+
+  const reserveSong = (song) => {
+    getSocket()?.emit('song:select', { videoId: song.video_id || song.id, title: song.title, artist: song.artist });
+    setShowSongPicker(false);
+    setSongSearch('');
     setSongs([]);
   };
 
   const handleSkipTurn = () => {
     getSocket()?.emit('turn:skip');
-    setPlayingVideo(null); 
+    setPlayingVideo(null);
     setIsVideoPlaying(false);
   };
 
@@ -513,17 +501,15 @@ export default function RoomPage() {
         @keyframes pulseGlow { 0% { box-shadow: 0 0 5px #f9d423; border: 2px solid #f9d423; } 50% { box-shadow: 0 0 20px #f9d423; border: 2px solid #fff; } 100% { box-shadow: 0 0 5px #f9d423; border: 2px solid #f9d423; } }
         @keyframes heartbeat { 0% { transform: scale(1); } 15% { transform: scale(1.1); } 30% { transform: scale(1); } 45% { transform: scale(1.15); } 60% { transform: scale(1); } }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        /* ✨ [추가됨] 오버레이 강조 애니메이션 */
-        @keyframes attentionPulse { 0% { box-shadow: 0 0 10px #e94560; transform: scale(1); } 50% { box-shadow: 0 0 30px #e94560; transform: scale(1.02); } 100% { box-shadow: 0 0 10px #e94560; transform: scale(1); } }
-        
+
         .youtube-video-container {
           position: relative;
           width: 100%;
-          flex: 1; 
+          flex: 1;
           min-height: 0;
           border-radius: 0.75rem;
           overflow: hidden;
-          pointer-events: none;
+          /* ✨ CSS에서의 기본 pointer-events: none은 제거하고, 아래 inline style에서 상태에 따라 동적으로 제어합니다 */
         }
         .youtube-video-container iframe {
           position: absolute;
@@ -569,9 +555,9 @@ export default function RoomPage() {
       <header style={styles.header}>
         <button onClick={handleLeave} style={styles.leaveBtn}>나가기</button>
         <span style={styles.roomCode}>코드: {joinCode || '...'}</span>
-        
-        <button 
-          onClick={handleMicToggle} 
+
+        <button
+          onClick={handleMicToggle}
           style={{...styles.muteBtn, background: isMicOn ? '#ff4b2b' : '#30475e'}}
         >
           {isMicOn ? '🎤 켜짐' : '🔇 꺼짐'}
@@ -581,18 +567,10 @@ export default function RoomPage() {
       <div style={styles.mainDisplay}>
         {playingVideo ? (
           <div style={{...styles.songCard, position: 'relative' }}>
-            
+
             <div style={{position: 'absolute', top:0, left:0, right:0, bottom:0, zIndex: 1, pointerEvents: 'none'}}></div>
 
-            {/* ✨ [추가됨] 아이폰 등에서 자동재생 차단 시 덮어씌워지는 터치 유도 UI */}
-            {isAutoplayBlocked && (
-              <div style={styles.autoplayOverlay} onClick={handleForcePlay}>
-                <div style={styles.autoplayIcon}>👆</div>
-                <p style={{ margin: 0 }}>화면을 터치해서 재생 시작</p>
-                <p style={{ fontSize: '0.9rem', opacity: 0.8, marginTop: '0.5rem' }}>(동기화가 바로 진행됩니다)</p>
-              </div>
-            )}
-
+            {/* ✨ 로딩창은 비디오가 재생중이지 않으면서 '자동재생 차단' 상태가 아닐 때만 보입니다 */}
             {!isVideoPlaying && !isAutoplayBlocked && (
               <div style={styles.loadingOverlay}>
                 <div style={styles.loadingSpinner}></div>
@@ -600,29 +578,30 @@ export default function RoomPage() {
               </div>
             )}
 
-            <div className="youtube-video-container">
-              <YouTube 
-                videoId={playingVideo.videoId} 
-                opts={{ 
-                  playerVars: { autoplay: 1, controls: 0 , disablekb: 1 } 
+            {/* ✨ 차단 감지 시에만 pointerEvents를 'auto'로 풀어 직접 누를 수 있게 해줍니다 */}
+            <div className="youtube-video-container" style={{ pointerEvents: isAutoplayBlocked ? 'auto' : 'none' }}>
+              <YouTube
+                videoId={playingVideo.videoId}
+                opts={{
+                  playerVars: { autoplay: 1, controls: 0 , disablekb: 1 }
                 }}
                 host="https://www.youtube-nocookie.com"
                 onReady={onPlayerReady}
-                onStateChange={onPlayerStateChange} 
+                onStateChange={onPlayerStateChange}
               />
             </div>
-            
+
             <div style={{ width: '100%', pointerEvents: 'auto', zIndex: 2 }}>
               <h2 style={{...styles.songTitle, marginTop: '0.75rem'}}>{playingVideo.title}</h2>
               <p style={styles.songArtist}>{playingVideo.artist}</p>
-              
+
               <div style={styles.volumeControlContainer}>
                 <span style={{ fontSize: '0.85rem', color: '#aaa', minWidth: '40px' }}>MR</span>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="100" 
-                  value={ytVolume} 
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={ytVolume}
                   onChange={handleVolumeChange}
                   className="yt-volume-slider"
                 />
@@ -645,8 +624,8 @@ export default function RoomPage() {
       <div style={styles.participantSection}>
         <div style={styles.participantHeader}>
           <h3 style={styles.subTitle}>참여자 ({participants.length}/6명)</h3>
-          <button 
-            onClick={() => { setSelectedFriends([]); setShowInviteModal(true); }} 
+          <button
+            onClick={() => { setSelectedFriends([]); setShowInviteModal(true); }}
             style={styles.inviteBtn}
             disabled={participants.length >= 6}
           >
@@ -657,11 +636,11 @@ export default function RoomPage() {
         <div className="custom-scroll" style={styles.userList}>
           {participants.map((p) => {
             const isMe = String(p.id).trim() === String(user?.id).trim();
-            const isThisUserTurn = currentTurnId ? String(p.id).trim() === String(currentTurnId).trim() : false; 
-            
-            const statusData = friendStatuses[p.id]; 
-            const currentStatus = statusData?.status || statusData; 
-            
+            const isThisUserTurn = currentTurnId ? String(p.id).trim() === String(currentTurnId).trim() : false;
+
+            const statusData = friendStatuses[p.id];
+            const currentStatus = statusData?.status || statusData;
+
             const isReceived = currentStatus === 'received';
             const isFriend = currentStatus === 'friend';
             const isSent = currentStatus === 'sent';
@@ -671,40 +650,40 @@ export default function RoomPage() {
             else if (isSent) buttonText = '요청됨';
             else if (isReceived) buttonText = '수락하기';
 
-            const isUserMicOn = isMe ? isMicOn : (p.isMicOn ?? true); 
-            const currentVolume = volumes[p.id] || 0; 
-            
-            const pulseScale = 1 + (currentVolume / 100) * 0.8; 
+            const isUserMicOn = isMe ? isMicOn : (p.isMicOn ?? true);
+            const currentVolume = volumes[p.id] || 0;
+
+            const pulseScale = 1 + (currentVolume / 100) * 0.8;
 
             return (
               <div key={p.id} style={{
                 ...styles.userItem,
-                border: isThisUserTurn ? '2px solid #f9d423' : 'none' 
+                border: isThisUserTurn ? '2px solid #f9d423' : 'none'
               }}>
                 <div style={styles.userInfo}>
-                  
+
                   <div style={{...styles.avatar, background: 'transparent', overflow: 'hidden'}}>
-                    <img 
-                      src={avatarPath} 
-                      alt="프로필" 
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                    <img
+                      src={avatarPath}
+                      alt="프로필"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     />
                   </div>
-                  
+
                   <div style={styles.micStatusBox}>
                     {!isUserMicOn ? (
                       <span style={{ fontSize: '0.85rem' }}>🔇</span>
                     ) : (
                       <div style={{
                         ...styles.activeMicDot,
-                        transform: `scale(${pulseScale})`, 
-                        opacity: currentVolume > 5 ? 1 : 0.6 
+                        transform: `scale(${pulseScale})`,
+                        opacity: currentVolume > 5 ? 1 : 0.6
                       }} />
                     )}
                   </div>
 
                   <span style={styles.userName}>
-                    {p.nickname} {isMe && "(나)"} {isThisUserTurn && " 🎤"} 
+                    {p.nickname} {isMe && "(나)"} {isThisUserTurn && " 🎤"}
                   </span>
                 </div>
 
@@ -736,13 +715,13 @@ export default function RoomPage() {
             </button>
           ))}
         </div>
-        
+
         {amISinging ? (
-          <button 
-            onClick={handleSkipTurn} 
+          <button
+            onClick={handleSkipTurn}
             style={{
-              ...styles.addSongBtn, 
-              background: '#f9d423', 
+              ...styles.addSongBtn,
+              background: '#f9d423',
               color:'#1a1a2e',
               cursor: 'pointer'
             }}
@@ -751,16 +730,16 @@ export default function RoomPage() {
           </button>
         ) : isMyTurn ? (
           <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button 
-              onClick={() => setShowSongPicker(true)} 
+            <button
+              onClick={() => setShowSongPicker(true)}
               style={{ ...styles.addSongBtn, flex: 3, background: '#e94560', cursor: 'pointer' }}
             >
               🎶 노래 고르기
             </button>
-            <button 
-              onClick={handleSkipTurn} 
+            <button
+              onClick={handleSkipTurn}
               disabled={participants.length <= 1}
-              style={{ 
+              style={{
                 ...styles.smallPassBtn,
                 background: participants.length <= 1 ? '#444' : '#f9d423',
                 color: participants.length <= 1 ? '#888' : '#fff',
@@ -772,7 +751,7 @@ export default function RoomPage() {
             </button>
           </div>
         ) : (
-          <button 
+          <button
             style={{ ...styles.addSongBtn, background: '#444', cursor: 'not-allowed' }}
             disabled
           >
@@ -788,14 +767,14 @@ export default function RoomPage() {
               <h3 style={{ margin: 0, fontSize: 'clamp(1.2rem, 5vw, 1.5rem)' }}>노래 찾기 (MR 전용)</h3>
               <button onClick={() => setShowSongPicker(false)} style={styles.closeBtn}>X</button>
             </header>
-            
+
             <div style={styles.searchContainer}>
-              <input 
-                style={styles.searchInput} 
-                value={songSearch} 
-                onChange={(e) => setSongSearch(e.target.value)} 
+              <input
+                style={styles.searchInput}
+                value={songSearch}
+                onChange={(e) => setSongSearch(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && executeSearch()}
-                placeholder="제목이나 가수 검색" 
+                placeholder="제목이나 가수 검색"
               />
               <button onClick={executeSearch} style={styles.searchSubmitBtn}>검색</button>
             </div>
@@ -827,14 +806,14 @@ export default function RoomPage() {
           <div style={styles.modal}>
             <h2 style={{color: '#e94560', margin: '0 0 1rem 0', fontSize: 'clamp(1.5rem, 6vw, 1.75rem)'}}>방으로 친구 초대</h2>
             <p style={{color: '#aaa', marginBottom: '1.5rem', fontSize: 'clamp(0.9rem, 3.5vw, 1rem)'}}>지금 바로 방에 참여할 친구를 선택하세요.</p>
-            
+
             <div className="custom-scroll" style={styles.inviteFriendList}>
               {invitableFriends.length === 0 ? (
                 <div style={{textAlign: 'center', color: '#666', padding: '1.5rem 0', fontSize: 'clamp(1rem, 4vw, 1.125rem)'}}>초대할 수 있는 친구가 없습니다.</div>
               ) : (
                 invitableFriends.map(friend => (
-                  <div 
-                    key={friend.id} 
+                  <div
+                    key={friend.id}
                     style={{
                       ...styles.inviteItem,
                       border: selectedFriends.includes(friend.id) ? '2px solid #e94560' : '2px solid transparent',
@@ -857,8 +836,8 @@ export default function RoomPage() {
 
             <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem' }}>
               <button onClick={() => setShowInviteModal(false)} style={styles.cancelBtn}>취소</button>
-              <button 
-                onClick={handleSendInvites} 
+              <button
+                onClick={handleSendInvites}
                 style={{...styles.confirmBtn, opacity: selectedFriends.length === 0 ? 0.5 : 1}}
                 disabled={selectedFriends.length === 0}
               >
@@ -878,21 +857,21 @@ const styles = {
   reactionBubble: { position: 'absolute', bottom: '15vh', display: 'flex', flexDirection: 'column', alignItems: 'center', animation: 'bubbleUp 4s ease-out forwards' },
   reactionUser: { background: 'rgba(233, 69, 96, 0.9)', padding: '0.25rem 0.75rem', borderRadius: '1rem', fontSize: 'clamp(0.8rem, 3vw, 1rem)', fontWeight: 'bold', marginBottom: '0.25rem', whiteSpace: 'nowrap', boxShadow: '0 4px 10px rgba(0,0,0,0.3)' },
   reactionEmoji: { fontSize: 'clamp(2.5rem, 8vw, 3.5rem)' },
-  
+
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', zIndex: 10, gap: '0.5rem' },
   leaveBtn: { padding: '0.5rem 1rem', borderRadius: '0.75rem', background: '#53354a', color: '#fff', border: 'none', fontSize: 'clamp(0.9rem, 3vw, 1.1rem)', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' },
   roomCode: { fontSize: 'clamp(1.1rem, 4vw, 1.5rem)', fontWeight: 'bold', color: '#e94560', whiteSpace: 'nowrap' },
   muteBtn: { padding: '0.5rem 1rem', borderRadius: '0.75rem', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 'clamp(0.9rem, 3vw, 1.1rem)', fontWeight: 'bold', transition: '0.3s', whiteSpace: 'nowrap' },
-  
+
   mainDisplay: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0, width: '100%', marginBottom: '1rem' },
-  
-  songCard: { 
+
+  songCard: {
     display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
-    textAlign: 'center', padding: 'clamp(0.75rem, 2vw, 1.25rem)', background: 'rgba(233,69,96,0.1)', 
-    borderRadius: '1.5rem', border: '2px solid #e94560', width: '100%', maxWidth: '52rem', 
-    height: '100%', maxHeight: '55vh', boxSizing: 'border-box' 
+    textAlign: 'center', padding: 'clamp(0.75rem, 2vw, 1.25rem)', background: 'rgba(233,69,96,0.1)',
+    borderRadius: '1.5rem', border: '2px solid #e94560', width: '100%', maxWidth: '52rem',
+    height: '100%', maxHeight: '55vh', boxSizing: 'border-box'
   },
-  
+
   tagBadge: {
     background: '#e94560',
     color: '#fff',
@@ -913,18 +892,6 @@ const styles = {
     width: '40px', height: '40px', border: '4px solid rgba(255,255,255,0.3)',
     borderTop: '4px solid #e94560', borderRadius: '50%',
     animation: 'spin 1s linear infinite', marginBottom: '10px'
-  },
-
-  // ✨ [추가됨] 자동재생 차단 오버레이 스타일
-  autoplayOverlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    background: 'rgba(233, 69, 96, 0.95)', color: '#fff',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-    zIndex: 50, borderRadius: '1.5rem', cursor: 'pointer', pointerEvents: 'auto',
-    fontWeight: 'bold', fontSize: 'clamp(1.1rem, 4vw, 1.5rem)', animation: 'attentionPulse 2s infinite'
-  },
-  autoplayIcon: {
-    fontSize: '3rem', marginBottom: '1rem', animation: 'bubbleUp 1.5s infinite alternate'
   },
 
   volumeControlContainer: {
