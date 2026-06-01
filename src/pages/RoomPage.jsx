@@ -576,7 +576,7 @@ export default function RoomPage() {
             onClick={() => setIsTtsOn(!isTtsOn)}
             style={{...styles.muteBtn, background: isTtsOn ? '#4ade80' : '#30475e', color: isTtsOn ? '#1a1a2e' : '#fff'}}
           >
-            {isTtsOn ? '🔊 낭독 켜짐' : '🔈 낭독 꺼짐'}
+            {isTtsOn ? '🔊 켜짐' : '🔈 꺼짐'}
           </button>
 
           <button
