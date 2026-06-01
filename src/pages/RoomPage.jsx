@@ -59,10 +59,6 @@ export default function RoomPage() {
 
   const [isMicOn, setIsMicOn] = useState(!muted);
   
-  // ✨ TTS 온/오프 상태 관리 및 소켓 리스너용 Ref
-  const [isTtsOn, setIsTtsOn] = useState(true);
-  const isTtsOnRef = useRef(isTtsOn);
-  
   const [playingVideo, setPlayingVideo] = useState(null);
   const [isVideoPlaying, setIsVideoPlaying] = useState(false); 
   
@@ -80,11 +76,6 @@ export default function RoomPage() {
     playingVideoRef.current = playingVideo;
     userRef.current = user;
   }, [playingVideo, user]);
-
-  // ✨ TTS 설정이 바뀔 때마다 Ref 업데이트 (소켓 리스너에서 최신값 참조용)
-  useEffect(() => {
-    isTtsOnRef.current = isTtsOn;
-  }, [isTtsOn]);
 
   const isMyTurn = currentTurnId ? String(user?.id).trim() === String(currentTurnId).trim() : false;
   const amISinging = playingVideo?.singerId ? String(user?.id).trim() === String(playingVideo.singerId).trim() : false;
@@ -135,11 +126,7 @@ export default function RoomPage() {
         
         setIsInitialLoading(false);
       } catch (err) {
-<<<<<<< HEAD
         console.error("🚨 최초 마이크 연결 실패 (권한 거부 또는 서버 에러):", err);
-=======
-        console.error("🚨 최초 마이크 연결 실패:", err);
->>>>>>> 82b98561e3d8c882ae5b0743b8a4f2024f607189
         setIsMicOn(false);
         await refreshFriends();
         getSocket()?.emit('room:request_state', { roomId });
@@ -147,6 +134,7 @@ export default function RoomPage() {
         setTimeout(() => {
           getSocket()?.emit('voice:mute_toggle', { isMicOn: false });
         }, 500);
+        
         setIsInitialLoading(false);
       }
     };
@@ -274,17 +262,6 @@ export default function RoomPage() {
       }));
     };
 
-    // ✨ TTS (시스템 안내 방송) 수신 로직
-    const onRoomAnnounce = (data) => {
-      console.log('📢 시스템 공지:', data.message);
-      
-      // 유저가 TTS 기능을 켜놓았고, 음성 데이터가 존재할 때만 재생
-      if (isTtsOnRef.current && data.audioData) {
-        const audio = new Audio(`data:audio/mp3;base64,${data.audioData}`);
-        audio.play().catch(e => console.error("TTS 오디오 자동재생 실패 (브라우저 정책):", e));
-      }
-    };
-
     socket.on('room:state', onRoomState);
     socket.on('friend:update', onFriendUpdate);
     socket.on('user:reaction', onReaction);
@@ -293,7 +270,6 @@ export default function RoomPage() {
     socket.on('song:request_sync', onRequestSync);
     socket.on('song:receive_sync', onReceiveSync);
     socket.on('voice:mute_status', onMuteStatus);
-    socket.on('room:announce', onRoomAnnounce); // 리스너 추가
 
     return () => { 
       socket.off('room:state', onRoomState);
@@ -304,7 +280,6 @@ export default function RoomPage() {
       socket.off('song:request_sync', onRequestSync);
       socket.off('song:receive_sync', onReceiveSync);
       socket.off('voice:mute_status', onMuteStatus); 
-      socket.off('room:announce', onRoomAnnounce); // 정리
     };
   }, [roomId, navigate, start, refreshFriends]); 
 
@@ -595,22 +570,12 @@ export default function RoomPage() {
         <button onClick={handleLeave} style={styles.leaveBtn}>나가기</button>
         <span style={styles.roomCode}>코드: {joinCode || '...'}</span>
         
-        {/* ✨ 우측에 TTS 버튼과 마이크 버튼을 함께 배치 */}
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button 
-            onClick={() => setIsTtsOn(!isTtsOn)}
-            style={{...styles.muteBtn, background: isTtsOn ? '#4ade80' : '#30475e', color: isTtsOn ? '#1a1a2e' : '#fff'}}
-          >
-            {isTtsOn ? '🔊 낭독 켜짐' : '🔈 낭독 꺼짐'}
-          </button>
-          
-          <button 
-            onClick={handleMicToggle} 
-            style={{...styles.muteBtn, background: isMicOn ? '#ff4b2b' : '#30475e'}}
-          >
-            {isMicOn ? '🎤 마이크 켜짐' : '🔇 마이크 꺼짐'}
-          </button>
-        </div>
+        <button 
+          onClick={handleMicToggle} 
+          style={{...styles.muteBtn, background: isMicOn ? '#ff4b2b' : '#30475e'}}
+        >
+          {isMicOn ? '🎤 켜짐' : '🔇 꺼짐'}
+        </button>
       </header>
 
       <div style={styles.mainDisplay}>
