@@ -44,7 +44,6 @@ export default function RoomPage() {
 
   const { roomId, joinCode, participants, currentTurnId } = useRoomStore();
   
-  // ✨ connected 상태를 추가로 가져옵니다.
   const { start, stop, toggleMute, muted, connected, volumes = {} } = useVoice();
 
   const [showSongPicker, setShowSongPicker] = useState(false);
@@ -63,6 +62,9 @@ export default function RoomPage() {
   const [playingVideo, setPlayingVideo] = useState(null);
   const [isVideoPlaying, setIsVideoPlaying] = useState(false); 
   
+  // ✨ [추가됨] 아이폰 등에서 자동재생이 차단되었는지 감지하는 상태
+  const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false); 
+
   const [ytVolume, setYtVolume] = useState(80);
 
   const playingVideoRef = useRef(playingVideo);
@@ -78,10 +80,8 @@ export default function RoomPage() {
   const isMyTurn = currentTurnId ? String(user?.id).trim() === String(currentTurnId).trim() : false;
   const amISinging = playingVideo?.singerId ? String(user?.id).trim() === String(playingVideo.singerId).trim() : false;
 
-  // ✨ 마이크 토글 로직 강화 (예외 처리 및 자동 복구)
   const handleMicToggle = async () => {
     try {
-      // 아고라 연결 자체가 안 된 상태(최초 에러 등)라면 재연결 우선 시도
       if (!connected) {
         await start(roomId);
         setIsMicOn(true);
@@ -89,7 +89,6 @@ export default function RoomPage() {
         return;
       }
 
-      // 정상 연결 상태면 단순 토글 수행
       if (toggleMute) await toggleMute(); 
       setIsMicOn((prev) => {
         const newState = !prev;
@@ -98,7 +97,6 @@ export default function RoomPage() {
       }); 
     } catch (err) {
       console.error("🚨 마이크 전환 중 에러 발생 (자동 꺼짐 전환):", err);
-      // 에러 시 강제로 내 UI를 끄고 타인에게도 꺼짐 상태 전파
       setIsMicOn(false);
       getSocket()?.emit('voice:mute_toggle', { isMicOn: false });
       alert("마이크 연결에 문제가 발생했습니다. 권한을 확인해주세요.");
@@ -122,7 +120,6 @@ export default function RoomPage() {
         
         setIsMicOn(true);
         
-        // ✨ 서버에 방 참여가 완전히 등록될 시간을 벌어준 뒤 상태 전파 (타이밍 이슈 해결)
         setTimeout(() => {
           getSocket()?.emit('voice:mute_toggle', { isMicOn: true });
         }, 500);
@@ -130,13 +127,10 @@ export default function RoomPage() {
         setIsInitialLoading(false);
       } catch (err) {
         console.error("🚨 최초 마이크 연결 실패 (권한 거부 또는 서버 에러):", err);
-        
         setIsMicOn(false);
-        
         await refreshFriends();
         getSocket()?.emit('room:request_state', { roomId });
         
-        // ✨ 에러 발생에 의한 꺼짐 상태도 확실하게 전파
         setTimeout(() => {
           getSocket()?.emit('voice:mute_toggle', { isMicOn: false });
         }, 500);
@@ -217,6 +211,7 @@ export default function RoomPage() {
         setPlayingVideo(data);
         setIsVideoPlaying(false); 
         setShowSongPicker(false);
+        setIsAutoplayBlocked(false); // ✨ [추가됨] 새 노래 재생 시 차단 상태 초기화
       }
     };
 
@@ -228,6 +223,7 @@ export default function RoomPage() {
       if (!isLeaving.current) {
         setPlayingVideo(null);
         setIsVideoPlaying(false);
+        setIsAutoplayBlocked(false); // ✨ [추가됨] 노래 정지 시 차단 상태 초기화
       }
     };
 
@@ -300,16 +296,52 @@ export default function RoomPage() {
 
     const isSinger = String(currentUser.id).trim() === String(currentVideo.singerId).trim();
 
-    if (isSinger) return; 
-
-    if (currentVideo.startAt) {
+    if (!isSinger && currentVideo.startAt) {
       const elapsed = (Date.now() - currentVideo.startAt) / 1000;
       const seekTo = Math.max(0, elapsed - AGORA_OFFSET_SEC);
       console.log(`[Sync] 중간입장 계산: elapsed=${elapsed.toFixed(2)}s → seek=${seekTo.toFixed(2)}s`);
       event.target.seekTo(seekTo, true);
     }
 
+    // ✨ [추가/수정됨] iOS 자동재생 대응 로직
+    // 일단 재생을 강제 시도합니다.
+    event.target.playVideo();
+    
+    // 1초 뒤에도 재생 상태(1)나 버퍼링(3)으로 넘어가지 않았다면 자동재생이 막힌 것으로 간주합니다.
+    setTimeout(() => {
+      if (ytPlayerRef.current && typeof ytPlayerRef.current.getPlayerState === 'function') {
+        const state = ytPlayerRef.current.getPlayerState();
+        if (state !== 1 && state !== 3) {
+          console.log("🚨 자동재생 차단 감지됨. 터치 오버레이를 표시합니다.");
+          setIsAutoplayBlocked(true);
+        }
+      }
+    }, 1000);
+
     getSocket()?.emit('song:request_sync');
+  };
+
+  // ✨ [추가됨] 화면 터치 시 수동으로 재생 및 동기화하는 함수
+  const handleForcePlay = () => {
+    setIsAutoplayBlocked(false);
+    if (ytPlayerRef.current && typeof ytPlayerRef.current.playVideo === 'function') {
+      ytPlayerRef.current.playVideo();
+      
+      const currentVideo = playingVideoRef.current;
+      const currentUser = userRef.current;
+      
+      if (currentVideo && currentUser) {
+        if (String(currentUser.id).trim() === String(currentVideo.singerId).trim()) {
+          // 내가 부르는 사람이면 시작 시간을 타인에게 뿌림
+          ytPlayerRef.current.getCurrentTime().then(time => {
+            getSocket()?.emit('song:send_sync', { time });
+          });
+        } else {
+          // 리스너라면 현재 방장의 시간을 요청하여 점프
+          getSocket()?.emit('song:request_sync');
+        }
+      }
+    }
   };
 
   const onPlayerStateChange = (event) => {
@@ -325,6 +357,8 @@ export default function RoomPage() {
     const amISingingNow = String(currentUser.id).trim() === String(currentVideo.singerId).trim();
 
     if (event.data === PLAYING) {
+      setIsAutoplayBlocked(false); // ✨ [추가됨] 재생 성공 시 차단 UI 확실히 제거
+      
       if (amISingingNow) {
         setIsVideoPlaying(true);
         event.target.getCurrentTime().then(time => {
@@ -343,7 +377,6 @@ export default function RoomPage() {
         getSocket()?.emit('song:request_sync');
       }
     }
-
     else if (event.data === BUFFERING) {
       setIsVideoPlaying(false);
       if (amISingingNow && syncIntervalRef.current) {
@@ -351,7 +384,6 @@ export default function RoomPage() {
         syncIntervalRef.current = null;
       }
     }
-
     else if (event.data === ENDED) {
       if (syncIntervalRef.current) {
         clearInterval(syncIntervalRef.current);
@@ -481,6 +513,8 @@ export default function RoomPage() {
         @keyframes pulseGlow { 0% { box-shadow: 0 0 5px #f9d423; border: 2px solid #f9d423; } 50% { box-shadow: 0 0 20px #f9d423; border: 2px solid #fff; } 100% { box-shadow: 0 0 5px #f9d423; border: 2px solid #f9d423; } }
         @keyframes heartbeat { 0% { transform: scale(1); } 15% { transform: scale(1.1); } 30% { transform: scale(1); } 45% { transform: scale(1.15); } 60% { transform: scale(1); } }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        /* ✨ [추가됨] 오버레이 강조 애니메이션 */
+        @keyframes attentionPulse { 0% { box-shadow: 0 0 10px #e94560; transform: scale(1); } 50% { box-shadow: 0 0 30px #e94560; transform: scale(1.02); } 100% { box-shadow: 0 0 10px #e94560; transform: scale(1); } }
         
         .youtube-video-container {
           position: relative;
@@ -550,7 +584,16 @@ export default function RoomPage() {
             
             <div style={{position: 'absolute', top:0, left:0, right:0, bottom:0, zIndex: 1, pointerEvents: 'none'}}></div>
 
-            {!isVideoPlaying && (
+            {/* ✨ [추가됨] 아이폰 등에서 자동재생 차단 시 덮어씌워지는 터치 유도 UI */}
+            {isAutoplayBlocked && (
+              <div style={styles.autoplayOverlay} onClick={handleForcePlay}>
+                <div style={styles.autoplayIcon}>👆</div>
+                <p style={{ margin: 0 }}>화면을 터치해서 재생 시작</p>
+                <p style={{ fontSize: '0.9rem', opacity: 0.8, marginTop: '0.5rem' }}>(동기화가 바로 진행됩니다)</p>
+              </div>
+            )}
+
+            {!isVideoPlaying && !isAutoplayBlocked && (
               <div style={styles.loadingOverlay}>
                 <div style={styles.loadingSpinner}></div>
                 <p>영상을 불러오고 동기화하는 중...</p>
@@ -870,6 +913,18 @@ const styles = {
     width: '40px', height: '40px', border: '4px solid rgba(255,255,255,0.3)',
     borderTop: '4px solid #e94560', borderRadius: '50%',
     animation: 'spin 1s linear infinite', marginBottom: '10px'
+  },
+
+  // ✨ [추가됨] 자동재생 차단 오버레이 스타일
+  autoplayOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    background: 'rgba(233, 69, 96, 0.95)', color: '#fff',
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+    zIndex: 50, borderRadius: '1.5rem', cursor: 'pointer', pointerEvents: 'auto',
+    fontWeight: 'bold', fontSize: 'clamp(1.1rem, 4vw, 1.5rem)', animation: 'attentionPulse 2s infinite'
+  },
+  autoplayIcon: {
+    fontSize: '3rem', marginBottom: '1rem', animation: 'bubbleUp 1.5s infinite alternate'
   },
 
   volumeControlContainer: {
