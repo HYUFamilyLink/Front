@@ -44,7 +44,6 @@ export default function RoomPage() {
 
   const { roomId, joinCode, participants, currentTurnId } = useRoomStore();
   
-  // ✨ connected 상태를 추가로 가져옵니다.
   const { start, stop, toggleMute, muted, connected, volumes = {} } = useVoice();
 
   const [showSongPicker, setShowSongPicker] = useState(false);
@@ -60,10 +59,14 @@ export default function RoomPage() {
 
   const [isMicOn, setIsMicOn] = useState(!muted);
 
+  // ✨ TTS 온/오프 상태 관리 및 소켓 리스너용 Ref
+  const [isTtsOn, setIsTtsOn] = useState(true);
+  const isTtsOnRef = useRef(isTtsOn);
+
   const [playingVideo, setPlayingVideo] = useState(null);
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
 
-  // ✨ [추가됨] 아이폰 등에서 자동재생이 차단되었는지 감지하는 상태
+  // ✨ [추가됨] 아이폰 등에서 자동재생 차단 상태 감지
   const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false);
 
   const [ytVolume, setYtVolume] = useState(80);
@@ -78,13 +81,15 @@ export default function RoomPage() {
     userRef.current = user;
   }, [playingVideo, user]);
 
+  useEffect(() => {
+    isTtsOnRef.current = isTtsOn;
+  }, [isTtsOn]);
+
   const isMyTurn = currentTurnId ? String(user?.id).trim() === String(currentTurnId).trim() : false;
   const amISinging = playingVideo?.singerId ? String(user?.id).trim() === String(playingVideo.singerId).trim() : false;
 
-  // ✨ 마이크 토글 로직 강화 (예외 처리 및 자동 복구)
   const handleMicToggle = async () => {
     try {
-      // 아고라 연결 자체가 안 된 상태(최초 에러 등)라면 재연결 우선 시도
       if (!connected) {
         await start(roomId);
         setIsMicOn(true);
@@ -92,7 +97,6 @@ export default function RoomPage() {
         return;
       }
 
-      // 정상 연결 상태면 단순 토글 수행
       if (toggleMute) await toggleMute();
       setIsMicOn((prev) => {
         const newState = !prev;
@@ -101,7 +105,6 @@ export default function RoomPage() {
       });
     } catch (err) {
       console.error("🚨 마이크 전환 중 에러 발생 (자동 꺼짐 전환):", err);
-      // 에러 시 강제로 내 UI를 끄고 타인에게도 꺼짐 상태 전파
       setIsMicOn(false);
       getSocket()?.emit('voice:mute_toggle', { isMicOn: false });
       alert("마이크 연결에 문제가 발생했습니다. 권한을 확인해주세요.");
@@ -125,25 +128,20 @@ export default function RoomPage() {
 
         setIsMicOn(true);
 
-        // ✨ 서버에 방 참여가 완전히 등록될 시간을 벌어준 뒤 상태 전파 (타이밍 이슈 해결)
         setTimeout(() => {
           getSocket()?.emit('voice:mute_toggle', { isMicOn: true });
         }, 500);
 
         setIsInitialLoading(false);
       } catch (err) {
-        console.error("🚨 최초 마이크 연결 실패 (권한 거부 또는 서버 에러):", err);
-
+        console.error("🚨 최초 마이크 연결 실패:", err);
         setIsMicOn(false);
-
         await refreshFriends();
         getSocket()?.emit('room:request_state', { roomId });
 
-        // ✨ 에러 발생에 의한 꺼짐 상태도 확실하게 전파
         setTimeout(() => {
           getSocket()?.emit('voice:mute_toggle', { isMicOn: false });
         }, 500);
-
         setIsInitialLoading(false);
       }
     };
@@ -220,7 +218,7 @@ export default function RoomPage() {
         setPlayingVideo(data);
         setIsVideoPlaying(false);
         setShowSongPicker(false);
-        setIsAutoplayBlocked(false); // ✨ 곡이 바뀔 때 차단 상태 초기화
+        setIsAutoplayBlocked(false);
       }
     };
 
@@ -232,7 +230,7 @@ export default function RoomPage() {
       if (!isLeaving.current) {
         setPlayingVideo(null);
         setIsVideoPlaying(false);
-        setIsAutoplayBlocked(false); // ✨ 곡 정지 시 차단 상태 초기화
+        setIsAutoplayBlocked(false);
       }
     };
 
@@ -271,6 +269,15 @@ export default function RoomPage() {
       }));
     };
 
+    const onRoomAnnounce = (data) => {
+      console.log('📢 시스템 공지:', data.message);
+
+      if (isTtsOnRef.current && data.audioData) {
+        const audio = new Audio(`data:audio/mp3;base64,${data.audioData}`);
+        audio.play().catch(e => console.error("TTS 오디오 자동재생 실패 (브라우저 정책):", e));
+      }
+    };
+
     socket.on('room:state', onRoomState);
     socket.on('friend:update', onFriendUpdate);
     socket.on('user:reaction', onReaction);
@@ -279,6 +286,7 @@ export default function RoomPage() {
     socket.on('song:request_sync', onRequestSync);
     socket.on('song:receive_sync', onReceiveSync);
     socket.on('voice:mute_status', onMuteStatus);
+    socket.on('room:announce', onRoomAnnounce);
 
     return () => {
       socket.off('room:state', onRoomState);
@@ -289,6 +297,7 @@ export default function RoomPage() {
       socket.off('song:request_sync', onRequestSync);
       socket.off('song:receive_sync', onReceiveSync);
       socket.off('voice:mute_status', onMuteStatus);
+      socket.off('room:announce', onRoomAnnounce);
     };
   }, [roomId, navigate, start, refreshFriends]);
 
@@ -312,16 +321,14 @@ export default function RoomPage() {
       event.target.seekTo(seekTo, true);
     }
 
-    // ✨ 일단 강제 재생을 시도합니다
     event.target.playVideo();
 
-    // ✨ 1.5초 후에도 재생 상태가 아니라면 아이폰 등에서 자동재생이 차단된 것으로 판단
     setTimeout(() => {
       if (ytPlayerRef.current && typeof ytPlayerRef.current.getPlayerState === 'function') {
         const state = ytPlayerRef.current.getPlayerState();
         if (state !== 1 && state !== 3) {
           console.log("🚨 자동재생 차단 감지됨. 터치 가능하도록 잠금을 풉니다.");
-          setIsAutoplayBlocked(true); // 차단 감지!
+          setIsAutoplayBlocked(true);
         }
       }
     }, 1500);
@@ -342,7 +349,6 @@ export default function RoomPage() {
     const amISingingNow = String(currentUser.id).trim() === String(currentVideo.singerId).trim();
 
     if (event.data === PLAYING) {
-      // ✨ 재생이 시작되면 무조건 상호작용을 다시 차단합니다 (원상 복구)
       setIsAutoplayBlocked(false);
 
       if (amISingingNow) {
@@ -509,7 +515,6 @@ export default function RoomPage() {
           min-height: 0;
           border-radius: 0.75rem;
           overflow: hidden;
-          /* ✨ CSS에서의 기본 pointer-events: none은 제거하고, 아래 inline style에서 상태에 따라 동적으로 제어합니다 */
         }
         .youtube-video-container iframe {
           position: absolute;
@@ -556,157 +561,168 @@ export default function RoomPage() {
         <button onClick={handleLeave} style={styles.leaveBtn}>나가기</button>
         <span style={styles.roomCode}>코드: {joinCode || '...'}</span>
 
-        <button
-          onClick={handleMicToggle}
-          style={{...styles.muteBtn, background: isMicOn ? '#ff4b2b' : '#30475e'}}
-        >
-          {isMicOn ? '🎤 켜짐' : '🔇 꺼짐'}
-        </button>
-      </header>
-
-      <div style={styles.mainDisplay}>
-        {playingVideo ? (
-          <div style={{...styles.songCard, position: 'relative' }}>
-
-            <div style={{position: 'absolute', top:0, left:0, right:0, bottom:0, zIndex: 1, pointerEvents: 'none'}}></div>
-
-            {/* ✨ 로딩창은 비디오가 재생중이지 않으면서 '자동재생 차단' 상태가 아닐 때만 보입니다 */}
-            {!isVideoPlaying && !isAutoplayBlocked && (
-              <div style={styles.loadingOverlay}>
-                <div style={styles.loadingSpinner}></div>
-                <p>영상을 불러오고 동기화하는 중...</p>
-              </div>
-            )}
-
-            {/* ✨ 차단 감지 시에만 pointerEvents를 'auto'로 풀어 직접 누를 수 있게 해줍니다 */}
-            <div className="youtube-video-container" style={{ pointerEvents: isAutoplayBlocked ? 'auto' : 'none' }}>
-              <YouTube
-                videoId={playingVideo.videoId}
-                opts={{
-                  playerVars: { autoplay: 1, controls: 0 , disablekb: 1 }
-                }}
-                host="https://www.youtube-nocookie.com"
-                onReady={onPlayerReady}
-                onStateChange={onPlayerStateChange}
-              />
-            </div>
-
-            <div style={{ width: '100%', pointerEvents: 'auto', zIndex: 2 }}>
-              <h2 style={{...styles.songTitle, marginTop: '0.75rem'}}>{playingVideo.title}</h2>
-              <p style={styles.songArtist}>{playingVideo.artist}</p>
-
-              <div style={styles.volumeControlContainer}>
-                <span style={{ fontSize: '0.85rem', color: '#aaa', minWidth: '40px' }}>MR</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={ytVolume}
-                  onChange={handleVolumeChange}
-                  className="yt-volume-slider"
-                />
-                <span style={{ fontSize: '0.85rem', color: '#aaa', minWidth: '30px', textAlign: 'right' }}>
-                  {ytVolume}%
-                </span>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div style={styles.songCard}>
-             <h2 style={styles.songTitle}>대기 중</h2>
-             <p style={styles.emptyCard}>
-               {currentTurnUser ? `현재 차례: ${currentTurnUser.nickname}` : '참여자를 기다리는 중...'}
-             </p>
-          </div>
-        )}
-      </div>
-
-      <div style={styles.participantSection}>
-        <div style={styles.participantHeader}>
-          <h3 style={styles.subTitle}>참여자 ({participants.length}/6명)</h3>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button
-            onClick={() => { setSelectedFriends([]); setShowInviteModal(true); }}
-            style={styles.inviteBtn}
-            disabled={participants.length >= 6}
+            onClick={() => setIsTtsOn(!isTtsOn)}
+            style={{...styles.muteBtn, background: isTtsOn ? '#4ade80' : '#30475e', color: isTtsOn ? '#1a1a2e' : '#fff'}}
           >
-            {participants.length >= 6 ? '꽉 찬 방' : '+ 친구 초대'}
+            {isTtsOn ? '🔊 낭독 켜짐' : '🔈 낭독 꺼짐'}
+          </button>
+
+          <button
+            onClick={handleMicToggle}
+            style={{...styles.muteBtn, background: isMicOn ? '#ff4b2b' : '#30475e'}}
+          >
+            {isMicOn ? '🎤 켜짐' : '🔇 꺼짐'}
           </button>
         </div>
+      </header>
 
-        <div className="custom-scroll" style={styles.userList}>
-          {participants.map((p) => {
-            const isMe = String(p.id).trim() === String(user?.id).trim();
-            const isThisUserTurn = currentTurnId ? String(p.id).trim() === String(currentTurnId).trim() : false;
+      {/* ✨ 중앙 컨텐츠 영역을 감싸는 스크롤 래퍼 추가 (하단 푸터 영역을 분리) */}
+      <div className="custom-scroll" style={styles.contentWrapper}>
+        <div style={styles.mainDisplay}>
+          {playingVideo ? (
+            <div style={{...styles.songCard, position: 'relative' }}>
 
-            const statusData = friendStatuses[p.id];
-            const currentStatus = statusData?.status || statusData;
+              <div style={{position: 'absolute', top:0, left:0, right:0, bottom:0, zIndex: 1, pointerEvents: 'none'}}></div>
 
-            const isReceived = currentStatus === 'received';
-            const isFriend = currentStatus === 'friend';
-            const isSent = currentStatus === 'sent';
-            const avatarPath = p.profileImage > 0 ? `/avatars/${p.profileImage}.jpg` : '/avatars/default.jpg';
-            let buttonText = '➕ 추가';
-            if (isFriend) buttonText = '✓ 친구';
-            else if (isSent) buttonText = '요청됨';
-            else if (isReceived) buttonText = '수락하기';
+              {!isVideoPlaying && !isAutoplayBlocked && (
+                <div style={styles.loadingOverlay}>
+                  <div style={styles.loadingSpinner}></div>
+                  <p>영상을 불러오고 동기화하는 중...</p>
+                </div>
+              )}
 
-            const isUserMicOn = isMe ? isMicOn : (p.isMicOn ?? true);
-            const currentVolume = volumes[p.id] || 0;
+              <div className="youtube-video-container" style={{ pointerEvents: isAutoplayBlocked ? 'auto' : 'none' }}>
+                <YouTube
+                  videoId={playingVideo.videoId}
+                  opts={{
+                    playerVars: { autoplay: 1, controls: 0 , disablekb: 1 }
+                  }}
+                  host="https://www.youtube-nocookie.com"
+                  onReady={onPlayerReady}
+                  onStateChange={onPlayerStateChange}
+                />
+              </div>
 
-            const pulseScale = 1 + (currentVolume / 100) * 0.8;
+              <div style={{ width: '100%', pointerEvents: 'auto', zIndex: 2 }}>
+                <h2 style={{...styles.songTitle, marginTop: '0.75rem'}}>{playingVideo.title}</h2>
+                <p style={styles.songArtist}>{playingVideo.artist}</p>
 
-            return (
-              <div key={p.id} style={{
-                ...styles.userItem,
-                border: isThisUserTurn ? '2px solid #f9d423' : 'none'
-              }}>
-                <div style={styles.userInfo}>
-
-                  <div style={{...styles.avatar, background: 'transparent', overflow: 'hidden'}}>
-                    <img
-                      src={avatarPath}
-                      alt="프로필"
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                    />
-                  </div>
-
-                  <div style={styles.micStatusBox}>
-                    {!isUserMicOn ? (
-                      <span style={{ fontSize: '0.85rem' }}>🔇</span>
-                    ) : (
-                      <div style={{
-                        ...styles.activeMicDot,
-                        transform: `scale(${pulseScale})`,
-                        opacity: currentVolume > 5 ? 1 : 0.6
-                      }} />
-                    )}
-                  </div>
-
-                  <span style={styles.userName}>
-                    {p.nickname} {isMe && "(나)"} {isThisUserTurn && " 🎤"}
+                <div style={styles.volumeControlContainer}>
+                  <span style={{ fontSize: '0.85rem', color: '#aaa', minWidth: '40px' }}>MR</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={ytVolume}
+                    onChange={handleVolumeChange}
+                    className="yt-volume-slider"
+                  />
+                  <span style={{ fontSize: '0.85rem', color: '#aaa', minWidth: '30px', textAlign: 'right' }}>
+                    {ytVolume}%
                   </span>
                 </div>
-
-                {!isMe && (
-                  <button
-                    onClick={() => handleFriendAction(p.id)}
-                    disabled={isInitialLoading || isFriend || isSent}
-                    style={{
-                      ...styles.friendBtn,
-                      ...(isReceived ? styles.receivedThumpEffect : {}),
-                      ...(isFriend ? styles.alreadyFriend : {}),
-                      opacity: (isSent || isInitialLoading) ? 0.7 : 1
-                    }}
-                  >
-                    {isInitialLoading ? '...' : buttonText}
-                  </button>
-                )}
               </div>
-            );
-          })}
+            </div>
+          ) : (
+            <div style={styles.songCard}>
+               <h2 style={styles.songTitle}>대기 중</h2>
+               <p style={styles.emptyCard}>
+                 {currentTurnUser ? `현재 차례: ${currentTurnUser.nickname}` : '참여자를 기다리는 중...'}
+               </p>
+            </div>
+          )}
         </div>
-      </div>
 
+        <div style={styles.participantSection}>
+          <div style={styles.participantHeader}>
+            <h3 style={styles.subTitle}>참여자 ({participants.length}/6명)</h3>
+            <button
+              onClick={() => { setSelectedFriends([]); setShowInviteModal(true); }}
+              style={styles.inviteBtn}
+              disabled={participants.length >= 6}
+            >
+              {participants.length >= 6 ? '꽉 찬 방' : '+ 친구 초대'}
+            </button>
+          </div>
+
+          <div className="custom-scroll" style={styles.userList}>
+            {participants.map((p) => {
+              const isMe = String(p.id).trim() === String(user?.id).trim();
+              const isThisUserTurn = currentTurnId ? String(p.id).trim() === String(currentTurnId).trim() : false;
+
+              const statusData = friendStatuses[p.id];
+              const currentStatus = statusData?.status || statusData;
+
+              const isReceived = currentStatus === 'received';
+              const isFriend = currentStatus === 'friend';
+              const isSent = currentStatus === 'sent';
+              const avatarPath = p.profileImage > 0 ? `/avatars/${p.profileImage}.jpg` : '/avatars/default.jpg';
+              let buttonText = '➕ 추가';
+              if (isFriend) buttonText = '✓ 친구';
+              else if (isSent) buttonText = '요청됨';
+              else if (isReceived) buttonText = '수락하기';
+
+              const isUserMicOn = isMe ? isMicOn : (p.isMicOn ?? true);
+              const currentVolume = volumes[p.id] || 0;
+
+              const pulseScale = 1 + (currentVolume / 100) * 0.8;
+
+              return (
+                <div key={p.id} style={{
+                  ...styles.userItem,
+                  border: isThisUserTurn ? '2px solid #f9d423' : 'none'
+                }}>
+                  <div style={styles.userInfo}>
+
+                    <div style={{...styles.avatar, background: 'transparent', overflow: 'hidden'}}>
+                      <img
+                        src={avatarPath}
+                        alt="프로필"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    </div>
+
+                    <div style={styles.micStatusBox}>
+                      {!isUserMicOn ? (
+                        <span style={{ fontSize: '0.85rem' }}>🔇</span>
+                      ) : (
+                        <div style={{
+                          ...styles.activeMicDot,
+                          transform: `scale(${pulseScale})`,
+                          opacity: currentVolume > 5 ? 1 : 0.6
+                        }} />
+                      )}
+                    </div>
+
+                    <span style={styles.userName}>
+                      {p.nickname} {isMe && "(나)"} {isThisUserTurn && " 🎤"}
+                    </span>
+                  </div>
+
+                  {!isMe && (
+                    <button
+                      onClick={() => handleFriendAction(p.id)}
+                      disabled={isInitialLoading || isFriend || isSent}
+                      style={{
+                        ...styles.friendBtn,
+                        ...(isReceived ? styles.receivedThumpEffect : {}),
+                        ...(isFriend ? styles.alreadyFriend : {}),
+                        opacity: (isSent || isInitialLoading) ? 0.7 : 1
+                      }}
+                    >
+                      {isInitialLoading ? '...' : buttonText}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div> {/* contentWrapper 끝 */}
+
+      {/* ✨ 하단 고정 사이드바(Footer) - 항상 노출 */}
       <footer style={styles.footer}>
         <div style={styles.emojiRow}>
           {REACTION_DATA.map(reaction => (
@@ -858,18 +874,30 @@ const styles = {
   reactionUser: { background: 'rgba(233, 69, 96, 0.9)', padding: '0.25rem 0.75rem', borderRadius: '1rem', fontSize: 'clamp(0.8rem, 3vw, 1rem)', fontWeight: 'bold', marginBottom: '0.25rem', whiteSpace: 'nowrap', boxShadow: '0 4px 10px rgba(0,0,0,0.3)' },
   reactionEmoji: { fontSize: 'clamp(2.5rem, 8vw, 3.5rem)' },
 
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', zIndex: 10, gap: '0.5rem' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', zIndex: 10, gap: '0.5rem', flexShrink: 0 },
   leaveBtn: { padding: '0.5rem 1rem', borderRadius: '0.75rem', background: '#53354a', color: '#fff', border: 'none', fontSize: 'clamp(0.9rem, 3vw, 1.1rem)', fontWeight: 'bold', cursor: 'pointer', whiteSpace: 'nowrap' },
   roomCode: { fontSize: 'clamp(1.1rem, 4vw, 1.5rem)', fontWeight: 'bold', color: '#e94560', whiteSpace: 'nowrap' },
   muteBtn: { padding: '0.5rem 1rem', borderRadius: '0.75rem', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 'clamp(0.9rem, 3vw, 1.1rem)', fontWeight: 'bold', transition: '0.3s', whiteSpace: 'nowrap' },
 
-  mainDisplay: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0, width: '100%', marginBottom: '1rem' },
+  // ✨ 영상 + 참여자 목록을 하나로 묶어 이 내부에서만 스크롤 되도록 하는 컨테이너 추가
+  contentWrapper: {
+    flex: 1,
+    overflowY: 'auto',
+    minHeight: 0,
+    width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    paddingRight: '0.5rem' // 스크롤바 겹침 방지 여백
+  },
+
+  // ✨ 영상 영역이 스크롤 안에서 너무 찌그러지지 않도록 minHeight 보장
+  mainDisplay: { flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '30vh', width: '100%', marginBottom: '1rem' },
 
   songCard: {
     display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center',
     textAlign: 'center', padding: 'clamp(0.75rem, 2vw, 1.25rem)', background: 'rgba(233,69,96,0.1)',
     borderRadius: '1.5rem', border: '2px solid #e94560', width: '100%', maxWidth: '52rem',
-    height: '100%', maxHeight: '55vh', boxSizing: 'border-box'
+    height: '100%', minHeight: '250px', maxHeight: '55vh', boxSizing: 'border-box'
   },
 
   tagBadge: {
@@ -895,9 +923,9 @@ const styles = {
   },
 
   volumeControlContainer: {
-    display: 'flex', 
-    alignItems: 'center', 
-    justifyContent: 'center', 
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: '0.5rem',
     marginTop: '0.5rem',
     width: '80%',
@@ -907,41 +935,51 @@ const styles = {
   songTitle: { fontSize: 'clamp(1rem, 3.5vw, 1.25rem)', margin: '0 0 0.25rem', wordBreak: 'keep-all', color: '#fff' },
   songArtist: { fontSize: 'clamp(0.85rem, 3.5vw, 1rem)', color: '#aaa', margin: 0 },
   emptyCard: { fontSize: 'clamp(1rem, 4vw, 1.25rem)', color: '#666', textAlign: 'center' },
-  
-  participantSection: { marginBottom: '1rem' },
+
+  participantSection: { flex: '0 0 auto', marginBottom: '1rem' },
   participantHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' },
   subTitle: { fontSize: 'clamp(1rem, 3.5vw, 1.15rem)', color: '#e94560', margin: 0 },
   inviteBtn: { padding: '0.4rem 0.6rem', background: 'transparent', border: '1px solid #e94560', color: '#e94560', borderRadius: '0.5rem', fontWeight: 'bold', cursor: 'pointer', fontSize: 'clamp(0.8rem, 2.5vw, 0.9rem)' },
-  
+
   userList: { display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '12rem', overflowY: 'auto', paddingRight: '0.5rem' },
   userItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '0.6rem 0.8rem', borderRadius: '0.75rem' },
   userInfo: { display: 'flex', alignItems: 'center', gap: '0.75rem' },
   avatar: { width: 'clamp(2rem, 8vw, 2.5rem)', height: 'clamp(2rem, 8vw, 2.5rem)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 'clamp(1rem, 3.5vw, 1.25rem)', fontWeight: 'bold', color: '#fff' },
 
-  micStatusBox: { 
-    width: '24px', 
-    height: '24px', 
-    borderRadius: '50%', 
-    background: 'rgba(0,0,0,0.3)', 
-    display: 'flex', 
-    alignItems: 'center', 
-    justifyContent: 'center' 
+  micStatusBox: {
+    width: '24px',
+    height: '24px',
+    borderRadius: '50%',
+    background: 'rgba(0,0,0,0.3)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
   },
-  activeMicDot: { 
-    width: '10px', 
-    height: '10px', 
-    borderRadius: '50%', 
-    background: '#4ade80', 
+  activeMicDot: {
+    width: '10px',
+    height: '10px',
+    borderRadius: '50%',
+    background: '#4ade80',
     boxShadow: '0 0 6px #4ade80',
-    transition: 'transform 0.1s ease-out, opacity 0.1s ease-out' 
+    transition: 'transform 0.1s ease-out, opacity 0.1s ease-out'
   },
 
   userName: { fontSize: 'clamp(0.9rem, 3.5vw, 1rem)' },
   friendBtn: { padding: '0.4rem 0.6rem', borderRadius: '0.5rem', border: 'none', background: '#30475e', color: '#fff', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.3s ease', fontSize: 'clamp(0.8rem, 2.5vw, 0.9rem)', whiteSpace: 'nowrap' },
   receivedThumpEffect: { background: 'linear-gradient(45deg, #f9d423, #ff4e50)', color: '#1a1a2e', animation: 'heartbeat 1.2s infinite ease-in-out, pulseGlow 1.2s infinite' },
   alreadyFriend: { background: 'transparent', border: '2px solid #e94560', color: '#e94560' },
-  
-  footer: { display: 'flex', flexDirection: 'column', gap: '0.75rem', zIndex: 10 },
+
+  // ✨ 하단 Footer가 절대 찌그러지지 않고 밑바닥에 고정되도록 flexShrink: 0 추가
+  footer: {
+    flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.75rem',
+    zIndex: 10,
+    paddingTop: '1rem', // 스크롤 영역과 시각적인 분리를 위한 위쪽 여백
+    borderTop: '1px solid rgba(255,255,255,0.05)' // 은은한 경계선
+  },
+
   emojiRow: { display: 'flex', justifyContent: 'space-between' },
   emojiBtn: { fontSize: 'clamp(1.8rem, 7vw, 2.2rem)', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 },
   
