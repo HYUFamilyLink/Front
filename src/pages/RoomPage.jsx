@@ -281,12 +281,12 @@ export default function RoomPage() {
           console.log(`[Debug: Sync Recv] 방장 시간: ${time.toFixed(2)}s | 내 시간: ${myTime.toFixed(2)}s | 오차: ${diff.toFixed(2)}s | 쿨타임경과: ${timeSinceLastSeek}ms`);
 
           // 임계값 초과 & 쿨타임(3초) 경과 시 스킵 실행
-          if (diff > 0.1 && timeSinceLastSeek > 3000) {
-            console.log(`👉 [Debug: Seek 실행] 오차 발생! ${myTime.toFixed(2)}s 에서 ${targetTime.toFixed(2)}s 로 강제 건너뛰기`);
+          if (diff > 0.2 && timeSinceLastSeek > 3000) {
+            console.log(`[Debug: Seek 실행] 오차 발생! ${myTime.toFixed(2)}s 에서 ${targetTime.toFixed(2)}s 로 강제 건너뛰기`);
             ytPlayerRef.current.seekTo(targetTime, true);
             lastSeekTimeRef.current = now; // 쿨타임 리셋
-          } else if (diff > 0.1 && timeSinceLastSeek <= 3000) {
-            console.warn(`⏳ [Debug: Seek 무시] 오차가 크지만 아직 쿨타임 중입니다. (남은 쿨타임: ${3000 - timeSinceLastSeek}ms)`);
+          } else if (diff > 0.2 && timeSinceLastSeek <= 3000) {
+            console.warn(`[Debug: Seek 무시] 오차가 크지만 아직 쿨타임 중입니다. (남은 쿨타임: ${3000 - timeSinceLastSeek}ms)`);
           }
         }
         setIsVideoPlaying(true);
