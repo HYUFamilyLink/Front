@@ -252,7 +252,6 @@ export default function RoomPage() {
       }
     };
 
-    // ✨ [수정됨] 수신 및 동기화 보정 부분 (완벽한 디버깅 추가)
     const onReceiveSync = async ({ time }) => {
       const currentVideo = playingVideoRef.current;
       const currentUser = userRef.current;
@@ -276,8 +275,6 @@ export default function RoomPage() {
           const diff = Math.abs(myTime - targetTime);
           const now = Date.now();
           const timeSinceLastSeek = now - lastSeekTimeRef.current;
-
-          // 💬 항상 찍히는 디버그 로그 (상태 추적용)
           console.log(`[Debug: Sync Recv] 방장 시간: ${time.toFixed(2)}s | 내 시간: ${myTime.toFixed(2)}s | 오차: ${diff.toFixed(2)}s | 쿨타임경과: ${timeSinceLastSeek}ms`);
 
           // 임계값 초과 & 쿨타임(3초) 경과 시 스킵 실행
