@@ -59,14 +59,14 @@ export default function RoomPage() {
 
   const [isMicOn, setIsMicOn] = useState(!muted);
 
-  // ✨ TTS 온/오프 상태 관리 및 소켓 리스너용 Ref
+  // TTS 온/오프 상태 관리 및 소켓 리스너용 Ref
   const [isTtsOn, setIsTtsOn] = useState(true);
   const isTtsOnRef = useRef(isTtsOn);
 
   const [playingVideo, setPlayingVideo] = useState(null);
   const [isVideoPlaying, setIsVideoPlaying] = useState(false);
 
-  // ✨ 아이폰 등에서 자동재생 차단 상태 감지
+  // 아이폰 등에서 자동재생 차단 상태 감지
   const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false);
 
   const [ytVolume, setYtVolume] = useState(80);
@@ -75,6 +75,9 @@ export default function RoomPage() {
   const userRef = useRef(user);
   const ytPlayerRef = useRef(null);
   const syncIntervalRef = useRef(null);
+  
+  // 동기화 요청이 너무 빈번한 경우 방지
+  const lastSeekTimeRef = useRef(0);
 
   useEffect(() => {
     playingVideoRef.current = playingVideo;
@@ -219,6 +222,7 @@ export default function RoomPage() {
         setIsVideoPlaying(false);
         setShowSongPicker(false);
         setIsAutoplayBlocked(false);
+        lastSeekTimeRef.current = 0;
       }
     };
 
@@ -231,30 +235,58 @@ export default function RoomPage() {
         setPlayingVideo(null);
         setIsVideoPlaying(false);
         setIsAutoplayBlocked(false);
+        lastSeekTimeRef.current = 0;
       }
     };
 
+    // ✨ [수정됨] 방장이 싱크를 요청받았을 때 응답하는 부분 (await 추가 및 디버그)
     const onRequestSync = async () => {
       const currentVideo = playingVideoRef.current;
       const currentUser = userRef.current;
       if (currentVideo && currentUser && String(currentUser.id).trim() === String(currentVideo.singerId).trim()) {
         if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
-          const time = await ytPlayerRef.current.getCurrentTime();
+          const time = await ytPlayerRef.current.getCurrentTime(); // await 추가
+          console.log(`[Debug: Sync Request 응답] 방장이 늦게 온 사람에게 시간 전송: ${time.toFixed(2)}s`);
           socket.emit('song:send_sync', { time });
         }
       }
     };
 
+    // ✨ [수정됨] 수신 및 동기화 보정 부분 (완벽한 디버깅 추가)
     const onReceiveSync = async ({ time }) => {
       const currentVideo = playingVideoRef.current;
       const currentUser = userRef.current;
+      
       if (currentVideo && currentUser && String(currentUser.id).trim() !== String(currentVideo.singerId).trim()) {
         if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === 'function') {
+          
+          // 방어 로직: 유튜브 상태를 await로 받아옴
+          if (typeof ytPlayerRef.current.getPlayerState === 'function') {
+            const state = await ytPlayerRef.current.getPlayerState();
+            if (state === 3 || state === -1) {
+              console.log(`[Debug: Sync Recv 무시] 현재 로딩(3)이거나 미실행(-1) 상태입니다. (state: ${state})`);
+              return;
+            }
+          }
+
+          // 현재 내 시간 확인 (await 추가)
           const myTime = await ytPlayerRef.current.getCurrentTime();
           const targetTime = Math.max(0, time - AGORA_OFFSET_SEC);
-          if (Math.abs(myTime - targetTime) > 0.1) {
-            console.log(`[Sync] 드리프트 보정: ${myTime.toFixed(2)}s → ${targetTime.toFixed(2)}s`);
+
+          const diff = Math.abs(myTime - targetTime);
+          const now = Date.now();
+          const timeSinceLastSeek = now - lastSeekTimeRef.current;
+
+          // 💬 항상 찍히는 디버그 로그 (상태 추적용)
+          console.log(`[Debug: Sync Recv] 방장 시간: ${time.toFixed(2)}s | 내 시간: ${myTime.toFixed(2)}s | 오차: ${diff.toFixed(2)}s | 쿨타임경과: ${timeSinceLastSeek}ms`);
+
+          // 임계값 초과 & 쿨타임(3초) 경과 시 스킵 실행
+          if (diff > 0.1 && timeSinceLastSeek > 3000) {
+            console.log(`👉 [Debug: Seek 실행] 오차 발생! ${myTime.toFixed(2)}s 에서 ${targetTime.toFixed(2)}s 로 강제 건너뛰기`);
             ytPlayerRef.current.seekTo(targetTime, true);
+            lastSeekTimeRef.current = now; // 쿨타임 리셋
+          } else if (diff > 0.1 && timeSinceLastSeek <= 3000) {
+            console.warn(`⏳ [Debug: Seek 무시] 오차가 크지만 아직 쿨타임 중입니다. (남은 쿨타임: ${3000 - timeSinceLastSeek}ms)`);
           }
         }
         setIsVideoPlaying(true);
@@ -325,7 +357,7 @@ export default function RoomPage() {
 
     setTimeout(() => {
       if (ytPlayerRef.current && typeof ytPlayerRef.current.getPlayerState === 'function') {
-        const state = ytPlayerRef.current.getPlayerState();
+        const state = ytPlayerRef.current.getPlayerState(); // onReady에선 바로 평가해도 무방
         if (state !== 1 && state !== 3) {
           console.log("🚨 자동재생 차단 감지됨. 터치 가능하도록 잠금을 풉니다.");
           setIsAutoplayBlocked(true);
@@ -347,32 +379,45 @@ export default function RoomPage() {
     if (!currentVideo || !currentUser) return;
 
     const amISingingNow = String(currentUser.id).trim() === String(currentVideo.singerId).trim();
+    
+    // 💬 비디오 상태 변경 로깅
+    console.log(`[Debug: State] 비디오 상태 변경됨: ${event.data} (현재 방장 여부: ${amISingingNow})`);
 
     if (event.data === PLAYING) {
       setIsAutoplayBlocked(false);
 
       if (amISingingNow) {
         setIsVideoPlaying(true);
-        event.target.getCurrentTime().then(time => {
-          getSocket()?.emit('song:send_sync', { time });
-        });
-        if (!syncIntervalRef.current) {
-          syncIntervalRef.current = setInterval(() => {
+        
+        // ✨ [수정됨] 방장의 시간 전송 로직 (await 복구)
+        const broadcastSync = async () => {
+          try {
             if (ytPlayerRef.current?.getCurrentTime) {
-              ytPlayerRef.current.getCurrentTime().then(t => {
-                getSocket()?.emit('song:send_sync', { time: t });
-              });
+              const t = await ytPlayerRef.current.getCurrentTime();
+              console.log(`📤 [Debug: Sync Send] 방장 시간 발송: ${t.toFixed(2)}s`);
+              getSocket()?.emit('song:send_sync', { time: t });
             }
-          }, 3000);
+          } catch (e) {
+            console.error("Sync error:", e);
+          }
+        };
+
+        broadcastSync();
+
+        if (!syncIntervalRef.current) {
+          console.log("⏱️ [Debug: Interval] 3초 동기화 타이머 시작");
+          syncIntervalRef.current = setInterval(broadcastSync, 3000);
         }
       } else {
-        getSocket()?.emit('song:request_sync');
+        // ✨ [핵심 조치] 리스너는 PLAYING이 되어도 쿨타임을 초기화하지 않고 얌전히 듣기만 함
+        console.log("🎧 [Debug: Listener] 리스너 영상 재생 시작. (불필요한 쿨타임 리셋 제거 완료)");
+        setIsVideoPlaying(true);
       }
     }
-
     else if (event.data === BUFFERING) {
       setIsVideoPlaying(false);
       if (amISingingNow && syncIntervalRef.current) {
+        console.log("⏸️ [Debug: Interval] 방장 버퍼링 진입 - 타이머 정지");
         clearInterval(syncIntervalRef.current);
         syncIntervalRef.current = null;
       }
@@ -380,6 +425,7 @@ export default function RoomPage() {
 
     else if (event.data === ENDED) {
       if (syncIntervalRef.current) {
+        console.log("🛑 [Debug: Interval] 영상 종료 - 타이머 정지");
         clearInterval(syncIntervalRef.current);
         syncIntervalRef.current = null;
       }
@@ -500,14 +546,13 @@ export default function RoomPage() {
 
   const currentTurnUser = participants.find(p => String(p.id).trim() === String(currentTurnId).trim());
 
-  // ✨ [추가됨] 참가자 목록 정렬: '현재 노래하는 사람'을 가장 위로 올리고, 나머지는 원래 순서(들어온 순서) 유지
   const sortedParticipants = [...participants].sort((a, b) => {
     const isATurn = currentTurnId ? String(a.id).trim() === String(currentTurnId).trim() : false;
     const isBTurn = currentTurnId ? String(b.id).trim() === String(currentTurnId).trim() : false;
 
     if (isATurn) return -1;
     if (isBTurn) return 1;
-    return 0; // 서버가 내려준 기본 배열 순서 유지 (늦게 온 사람은 자연스럽게 뒤로 감)
+    return 0; 
   });
 
   return (
@@ -588,10 +633,8 @@ export default function RoomPage() {
         </div>
       </header>
 
-      {/* ✨ 화면 내부 스크롤을 담당하는 메인 래퍼 */}
       <div className="custom-scroll" style={styles.contentWrapper}>
 
-        {/* 영상창 영역 */}
         <div style={styles.mainDisplay}>
           {playingVideo ? (
             <div style={{...styles.songCard, position: 'relative' }}>
@@ -647,7 +690,6 @@ export default function RoomPage() {
           )}
         </div>
 
-        {/* ✨ 액션 영역 (이모지 & 노래고르기 등) - 영상 바로 밑에 배치 */}
         <div style={styles.actionSection}>
           <div style={styles.emojiRow}>
             {REACTION_DATA.map(reaction => (
@@ -701,7 +743,6 @@ export default function RoomPage() {
           )}
         </div>
 
-        {/* ✨ 참가자 영역 (맨 아래 배치) */}
         <div style={styles.participantSection}>
           <div style={styles.participantHeader}>
             <h3 style={styles.subTitle}>참여자 ({participants.length}/6명)</h3>
@@ -715,7 +756,6 @@ export default function RoomPage() {
           </div>
 
           <div className="custom-scroll" style={styles.userList}>
-            {/* ✨ 정렬된 배열(sortedParticipants)을 사용하여 렌더링 */}
             {sortedParticipants.map((p) => {
               const isMe = String(p.id).trim() === String(user?.id).trim();
               const isThisUserTurn = currentTurnId ? String(p.id).trim() === String(currentTurnId).trim() : false;
@@ -882,7 +922,6 @@ export default function RoomPage() {
 }
 
 const styles = {
-  // ✨ 100dvh를 사용하여 스마트폰 브라우저 상하단 툴바 무시 및 픽셀 깨짐 해결
   container: { height: '100dvh', display: 'flex', flexDirection: 'column', background: '#1a1a2e', color: '#fff', padding: 'clamp(1rem, 4vw, 2rem)', position: 'relative', overflow: 'hidden', boxSizing: 'border-box' },
   reactionLayer: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', zIndex: 100 },
   reactionBubble: { position: 'absolute', bottom: '15vh', display: 'flex', flexDirection: 'column', alignItems: 'center', animation: 'bubbleUp 4s ease-out forwards' },
@@ -894,7 +933,6 @@ const styles = {
   roomCode: { fontSize: 'clamp(1.1rem, 4vw, 1.5rem)', fontWeight: 'bold', color: '#e94560', whiteSpace: 'nowrap' },
   muteBtn: { padding: '0.5rem 1rem', borderRadius: '0.75rem', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 'clamp(0.9rem, 3vw, 1.1rem)', fontWeight: 'bold', transition: '0.3s', whiteSpace: 'nowrap' },
 
-  // ✨ 영상 + 버튼 + 참가자를 묶어 전체적인 자연스러운 세로 스크롤 허용
   contentWrapper: {
     flex: 1,
     overflowY: 'auto',
@@ -905,7 +943,6 @@ const styles = {
     paddingRight: '0.5rem'
   },
 
-  // ✨ 영상 영역
   mainDisplay: { flexShrink: 0, display: 'flex', justifyContent: 'center', width: '100%', marginBottom: '1rem' },
 
   songCard: {
@@ -924,7 +961,6 @@ const styles = {
   songArtist: { fontSize: 'clamp(0.85rem, 3.5vw, 1rem)', color: '#aaa', margin: 0 },
   emptyCard: { fontSize: 'clamp(1rem, 4vw, 1.25rem)', color: '#666', textAlign: 'center' },
 
-  // ✨ 영상창 바로 밑에 붙는 액션 구역 (이모지 & 버튼)
   actionSection: {
     display: 'flex', flexDirection: 'column', gap: '0.75rem', width: '100%', maxWidth: '52rem',
     margin: '0 auto 1rem auto', flexShrink: 0
@@ -934,7 +970,6 @@ const styles = {
   addSongBtn: { padding: '0.75rem', borderRadius: '0.75rem', color: '#fff', fontSize: 'clamp(1.1rem, 4vw, 1.25rem)', fontWeight: 'bold', border: 'none', transition: '0.3s' },
   smallPassBtn: { flex: 1, padding: '0.75rem 0.5rem', borderRadius: '0.75rem', background: '#30475e', color: '#fff', fontSize: 'clamp(0.85rem, 3vw, 1rem)', fontWeight: 'bold', border: 'none', cursor: 'pointer', transition: '0.3s', whiteSpace: 'nowrap' },
 
-  // ✨ 가장 아래에 남은 공간을 채우는 참가자 섹션
   participantSection: { flexShrink: 0, width: '100%', maxWidth: '52rem', margin: '0 auto 1rem auto' },
   participantHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' },
   subTitle: { fontSize: 'clamp(1rem, 3.5vw, 1.15rem)', color: '#e94560', margin: 0 },
