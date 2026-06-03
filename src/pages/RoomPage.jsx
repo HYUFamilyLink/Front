@@ -239,7 +239,6 @@ export default function RoomPage() {
       }
     };
 
-    // ✨ [수정됨] 방장이 싱크를 요청받았을 때 응답하는 부분 (await 추가 및 디버그)
     const onRequestSync = async () => {
       const currentVideo = playingVideoRef.current;
       const currentUser = userRef.current;
