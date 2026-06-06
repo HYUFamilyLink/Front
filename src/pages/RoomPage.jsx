@@ -543,7 +543,7 @@ export default function RoomPage() {
 
   const currentTurnUser = participants.find(p => String(p.id).trim() === String(currentTurnId).trim());
 
-  // ✨ [추가됨] 참가자 목록 정렬: '현재 노래하는 사람'을 가장 위로 올리고, 나머지는 원래 순서(들어온 순서) 유지
+  // ✨참가자 목록 정렬: '현재 노래하는 사람'을 가장 위로 올리고, 나머지는 원래 순서(들어온 순서) 유지
   const sortedParticipants = [...participants].sort((a, b) => {
     const isATurn = currentTurnId ? String(a.id).trim() === String(currentTurnId).trim() : false;
     const isBTurn = currentTurnId ? String(b.id).trim() === String(currentTurnId).trim() : false;
