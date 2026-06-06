@@ -277,7 +277,7 @@ export default function RoomPage() {
           if (!offsetLockedRef.current) {
             const delayMs = typeof getAudioDelay === 'function' ? getAudioDelay(currentVideo.singerId, false) : 150;
             if (delayMs !== 150) { // 150이 아니라는 건 실제 통계가 확보되었다는 뜻
-              const BUFFER_MS = 300; // onSongPlay와 동일하게 유지
+              const BUFFER_MS = 0; // onSongPlay와 동일하게 유지
               offsetRef.current = (delayMs + BUFFER_MS) / 1000;
               offsetLockedRef.current = true; // 갱신 후 잠금!
               console.log(`[Sync] 🔒 진짜 네트워크 지연 확보 및 잠금: ${delayMs}ms (총 오프셋: ${offsetRef.current}s)`);
