@@ -22,7 +22,6 @@ export function useVoice() {
     const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'h264' });
     clientRef.current = client;
 
-
     AgoraRTC.onAutoplayFailed = () => {
       const btn = document.createElement('button');
       btn.innerText = '🔊 소리를 켜려면 탭하세요';
@@ -113,6 +112,22 @@ export function useVoice() {
       console.error('[Agora] toggleMute failed:', err);
     }
   }, [muted]);
+const getAudioDelay = useCallback((targetUid, isSinger) => {
+    if (isSinger) return 0;
+    if (!clientRef.current) return 150;
+
+    try {
+      const stats = clientRef.current.getRemoteAudioStats()[targetUid];
+    
+      if (stats && typeof stats.receiveDelay === 'number' && stats.receiveDelay > 0) {
+        return Math.min(Math.max(stats.receiveDelay, 50), 500);
+      }
+      return 150;
+    } catch (err) {
+      console.warn('[Agora] Failed to get audio delay:', err);
+      return 150;
+    }
+  }, []);
 
   const stop = useCallback(async () => {
     localTrackRef.current?.close();
@@ -124,5 +139,5 @@ export function useVoice() {
     setVolumes({}); // 나갈 때 볼륨 초기화
   }, []);
 
-  return { start, stop, toggleMute, connected, muted, volumes };
+  return { start, stop, toggleMute, connected, muted, volumes, getAudioDelay };
 }
