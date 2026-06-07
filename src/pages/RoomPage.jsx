@@ -529,7 +529,7 @@ export default function RoomPage() {
   ) || [];
 
   const sendEmoji = (reactionId) => {
-    // 발송 쿨타임 적용: 0.1초 이내의 연속 클릭은 무시
+    // 발송 쿨타임 적용: 0.15초 이내의 연속 클릭은 무시
     const now = Date.now();
     if (now - lastSendTimeRef.current < 100) return;
     lastSendTimeRef.current = now;
