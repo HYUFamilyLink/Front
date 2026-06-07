@@ -70,12 +70,11 @@ export default function RoomPage() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const isLeaving = useRef(false);
 
-  // ✨ 기존 상수 대신 동적 오프셋 값을 담아둘 Ref 추가
+  //기존 상수 대신 동적 오프셋 값을 담아둘 Ref 추가
   const offsetRef = useRef(0.15); 
-  // ✨ 진짜 딜레이를 잡았는지 확인하기 위한 Ref 추가
   const offsetLockedRef = useRef(false);
   const lastSeekTimeRef = useRef(0);
-
+  const lastSendTimeRef = useRef(0);// 이모티콘 연타방지
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [selectedFriends, setSelectedFriends] = useState([]);
 
@@ -232,7 +231,16 @@ export default function RoomPage() {
       const displayIcon = reactionObj ? reactionObj.icon : (data.emoji || '✨');
 
       const rid = Date.now() + Math.random();
-      setActiveReactions(prev => [...prev, { ...data, emoji: displayIcon, id: rid, left: Math.floor(Math.random() * 60) + 20 }]);
+      
+      // 화면 렌더링 개수 제한
+      setActiveReactions(prev => {
+        const newReactions = [...prev, { ...data, emoji: displayIcon, id: rid, left: Math.floor(Math.random() * 60) + 20 }];
+        if (newReactions.length > 25) {
+          return newReactions.slice(newReactions.length - 20);
+        }
+        return newReactions;
+      });
+
       setTimeout(() => setActiveReactions(prev => prev.filter(r => r.id !== rid)), 4000);
     };
 
@@ -521,6 +529,11 @@ export default function RoomPage() {
   ) || [];
 
   const sendEmoji = (reactionId) => {
+    // 발송 쿨타임 적용: 0.1초 이내의 연속 클릭은 무시
+    const now = Date.now();
+    if (now - lastSendTimeRef.current < 100) return;
+    lastSendTimeRef.current = now;
+
     const reactionObj = REACTION_DATA.find(r => r.id === reactionId);
     getSocket()?.emit('user:reaction', {
       reactionId: reactionId,
