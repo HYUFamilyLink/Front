@@ -14,22 +14,39 @@ const REACTION_DATA = [
   { id: 'drum', icon: '🪘', sounds: ['/sounds/drum1.mp3','/sounds/drum2.mp3'] }, 
   { id: 'tambourine', icon: '🪇', sounds: ['/sounds/tam1.mp3', '/sounds/tam2.mp3'] },
 ];
+// 페이지 로드 시 모든 사운드를 미리 로드하여 재생 지연 최소화
+const audioPool = {};
+REACTION_DATA.forEach(reaction => {
+  reaction.sounds.forEach(url => {
+    const audio = new Audio(url);
+    audio.preload = 'auto'; // 페이지 로드 시 즉시 다운로드
+    audioPool[url] = audio;
+  });
+});
 
+const unlockAudioContext = () => {
+  const silentAudio = new Audio("data:audio/mp3;base64,//MkxAAQANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq");
+  silentAudio.play().catch(() => {});
+  document.removeEventListener('click', unlockAudioContext);
+  document.removeEventListener('touchstart', unlockAudioContext);
+};
+document.addEventListener('click', unlockAudioContext);
+document.addEventListener('touchstart', unlockAudioContext);
 const playReactionSound = (reactionId) => {
   const reactionObj = REACTION_DATA.find(r => r.id === reactionId);
   if (!reactionObj || !reactionObj.sounds || reactionObj.sounds.length === 0) return;
   
-  const soundArray = reactionObj.sounds;
-  const randomFile = soundArray[Math.floor(Math.random() * soundArray.length)];
-  
-  const audio = new Audio(randomFile);
-  audio.preservesPitch = false; 
-  audio.webkitPreservesPitch = false; 
-  
-  audio.playbackRate = 0.85 + Math.random() * 0.3;
-  audio.volume = 0.8; 
-  
-  audio.play().catch((err) => console.log('사운드 자동재생 차단됨:', err));
+  const randomFile = reactionObj.sounds[Math.floor(Math.random() * reactionObj.sounds.length)];
+  const baseAudio = audioPool[randomFile];
+
+  if (baseAudio) {
+    const audioClone = baseAudio.cloneNode();
+    audioClone.preservesPitch = false; 
+    audioClone.webkitPreservesPitch = false; 
+    audioClone.playbackRate = 0.85 + Math.random() * 0.3;
+    audioClone.volume = 0.8; 
+    audioClone.play().catch((err) => console.log('사운드 자동재생 차단됨:', err));
+  }
 };
 
 export default function RoomPage() {
@@ -155,8 +172,15 @@ export default function RoomPage() {
       await refreshFriends();
 
       useRoomStore.setState((state) => {
-        const rawParticipants = data.participants || state.participants;
-        const mergedParticipants = rawParticipants.map(newP => {
+        //무조건 서버에서 온 데이터(data.participants) 기준으로 중복을 제거
+        const newParticipants = data.participants || [];
+        
+        const uniqueParticipants = Array.from(
+          new Map(newParticipants.map(p => [String(p.id).trim(), p])).values()
+        );
+
+        // 마이크 상태(isMicOn)만 기존 state에서 가져와 유지
+        const finalParticipants = uniqueParticipants.map(newP => {
           const existingP = state.participants.find(p => String(p.id).trim() === String(newP.id).trim());
           return {
             ...newP,
@@ -164,14 +188,10 @@ export default function RoomPage() {
           };
         });
 
-        const uniqueParticipants = Array.from(
-          new Map(mergedParticipants.map(p => [String(p.id).trim(), p])).values()
-        );
-
         return {
           ...state,
           roomId: data.roomId || state.roomId,
-          participants: uniqueParticipants,
+          participants: finalParticipants, // 이전 상태 병합 없이 완전히 덮어쓰기
           joinCode: data.joinCode || state.joinCode,
           currentTurnId: data.currentTurnId !== undefined ? data.currentTurnId : state.currentTurnId
         };
@@ -280,7 +300,7 @@ export default function RoomPage() {
               const BUFFER_MS = 0; // onSongPlay와 동일하게 유지
               offsetRef.current = (delayMs + BUFFER_MS) / 1000;
               offsetLockedRef.current = true; // 갱신 후 잠금!
-              console.log(`[Sync] 🔒 진짜 네트워크 지연 확보 및 잠금: ${delayMs}ms (총 오프셋: ${offsetRef.current}s)`);
+              console.log(`[Sync] 🔒 네트워크 지연 확보 및 잠금: ${delayMs}ms (총 오프셋: ${offsetRef.current}s)`);
             }
           }
           // ✨ 고정 상수 대신 offsetRef.current 사용
