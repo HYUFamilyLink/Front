@@ -108,7 +108,22 @@ export default function RoomPage() {
   const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false);
 
   const [ytVolume, setYtVolume] = useState(80);
-
+  const [isYtMuted, setIsYtMuted] = useState(false);
+  // 유튜브 음소거 토글 함수
+  const toggleYtMute = () => {
+    setIsYtMuted((prev) => {
+      const nextMuted = !prev;
+      if (ytPlayerRef.current && typeof ytPlayerRef.current.isMuted === 'function') {
+        if (nextMuted) {
+          ytPlayerRef.current.mute();
+        } else {
+          ytPlayerRef.current.unMute();
+          ytPlayerRef.current.setVolume(ytVolume); // 음소거 해제 시 기존 볼륨으로 복구
+        }
+      }
+      return nextMuted;
+    });
+  };
   const playingVideoRef = useRef(playingVideo);
   const userRef = useRef(user);
   const ytPlayerRef = useRef(null);
@@ -711,16 +726,26 @@ export default function RoomPage() {
 
                 <div style={styles.volumeControlContainer}>
                   <span style={{ fontSize: '0.85rem', color: '#aaa', minWidth: '40px' }}>MR</span>
+                  <button
+                    onClick={toggleYtMute}
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1.2rem', padding: 0 }}
+                    >
+                    {isYtMuted ? '🔇' : '🔊'}
+                  </button>
+
                   <input
                     type="range"
                     min="0"
                     max="100"
                     value={ytVolume}
-                    onChange={handleVolumeChange}
+                    onChange={(e) => {
+                      handleVolumeChange(e);
+                      if (isYtMuted) toggleYtMute(); // 볼륨 조절 시 자동으로 음소거 해제
+                    }}
                     className="yt-volume-slider"
                   />
-                  <span style={{ fontSize: '0.85rem', color: '#aaa', minWidth: '30px', textAlign: 'right' }}>
-                    {ytVolume}%
+                  <span style={{ fontSize: '0.85rem', color: '#aaa', minWidth: '35px', textAlign: 'right' }}>
+                    {isYtMuted ? '0%' : `${ytVolume}%`}
                   </span>
                 </div>
               </div>
