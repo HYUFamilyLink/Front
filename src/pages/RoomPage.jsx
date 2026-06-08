@@ -828,7 +828,7 @@ export default function RoomPage() {
           </div>
 
           <div className="custom-scroll" style={styles.userList}>
-            {/* ✨ 정렬된 배열(sortedParticipants)을 사용하여 렌더링 */}
+            {/* 정렬된 배열을 사용하여 렌더링 */}
             {sortedParticipants.map((p) => {
               const isMe = String(p.id).trim() === String(user?.id).trim();
               const isThisUserTurn = currentTurnId ? String(p.id).trim() === String(currentTurnId).trim() : false;
@@ -836,14 +836,21 @@ export default function RoomPage() {
               const statusData = friendStatuses[p.id];
               const currentStatus = statusData?.status || statusData;
 
+              const isAlreadyFriend = friends?.some(f => String(f.id).trim() === String(p.id).trim());
+
+              const statusData = friendStatuses[p.id];
+              const currentStatus = typeof statusData === 'object' ? statusData?.status : statusData;
+
               const isReceived = currentStatus === 'received';
-              const isFriend = currentStatus === 'friend';
               const isSent = currentStatus === 'sent';
-              const avatarPath = p.profileImage > 0 ? `/avatars/${p.profileImage}.jpg` : '/avatars/default.jpg';
+              const isFriend = isAlreadyFriend || currentStatus === 'friend'; 
+              
               let buttonText = '➕ 추가';
               if (isFriend) buttonText = '✓ 친구';
               else if (isSent) buttonText = '요청됨';
               else if (isReceived) buttonText = '수락하기';
+
+              const avatarPath = p.profileImage > 0 ? `/avatars/${p.profileImage}.jpg` : '/avatars/default.jpg';
 
               const isUserMicOn = isMe ? isMicOn : (p.isMicOn ?? true);
               const currentVolume = volumes[p.id] || 0;
