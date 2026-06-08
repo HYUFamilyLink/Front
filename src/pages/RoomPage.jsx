@@ -596,27 +596,7 @@ export default function RoomPage() {
   const currentTurnUser = participants.find(p => String(p.id).trim() === String(currentTurnId).trim());
 
   // ✨참가자 목록 정렬: 현재 노래하는 사람을 가장 위로 올리고, 나머지는 원래 순서 유지
-  const sortedParticipants = [...participants].sort((a, b) => {
-    const aid = String(a.id).trim();
-    const bid = String(b.id).trim();
-    const turnId = currentTurnId ? String(currentTurnId).trim() : null;
-    const singerId = playingVideo?.singerId ? String(playingVideo.singerId).trim() : null;
-
-    // 1순위: 현재 노래를 부르고 있는 사람(가수)을 무조건 맨 위로
-    if (singerId) {
-      if (aid === singerId) return -1;
-      if (bid === singerId) return 1;
-    }
-
-    // 2순위: 가수가 없다면, 현재 차례(turn)인 사람을 맨 위로
-    if (turnId) {
-      if (aid === turnId) return -1;
-      if (bid === turnId) return 1;
-    }
-
-    // 3순위: 나머지는 서버가 준 기본 배열 순서 유지
-    return 0;
-  });
+  const sortedParticipants = participants;
 
   return (
     <div style={styles.container}>
