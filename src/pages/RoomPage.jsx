@@ -84,7 +84,7 @@ export default function RoomPage() {
   const [showSongPicker, setShowSongPicker] = useState(false);
   const [songSearch, setSongSearch] = useState('');
   const [songs, setSongs] = useState([]);
-
+  
   const [activeReactions, setActiveReactions] = useState([]);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const isLeaving = useRef(false);
@@ -113,7 +113,7 @@ export default function RoomPage() {
   const toggleYtMute = () => {
     setIsYtMuted((prev) => {
       const nextMuted = !prev;
-      if (ytPlayerRef.current && typeof ytPlayerRef.current.isMuted === 'function') {
+      if (ytPlayerRef.current && typeof ytPlayerRef.current.mute === 'function') {
         if (nextMuted) {
           ytPlayerRef.current.mute();
         } else {
@@ -832,9 +832,6 @@ export default function RoomPage() {
             {sortedParticipants.map((p) => {
               const isMe = String(p.id).trim() === String(user?.id).trim();
               const isThisUserTurn = currentTurnId ? String(p.id).trim() === String(currentTurnId).trim() : false;
-
-              const statusData = friendStatuses[p.id];
-              const currentStatus = statusData?.status || statusData;
 
               const isAlreadyFriend = friends?.some(f => String(f.id).trim() === String(p.id).trim());
 
