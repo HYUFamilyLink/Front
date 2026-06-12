@@ -157,7 +157,7 @@ export default function RoomPage() {
         return newState;
       });
     } catch (err) {
-      console.error("🚨 마이크 전환 중 에러 발생 (자동 꺼짐 전환):", err);
+      console.error("마이크 전환 중 에러 발생 (자동 꺼짐):", err);
       setIsMicOn(false);
       getSocket()?.emit('voice:mute_toggle', { isMicOn: false });
       alert("마이크 연결에 문제가 발생했습니다. 권한을 확인해주세요.");
@@ -187,7 +187,7 @@ export default function RoomPage() {
 
         setIsInitialLoading(false);
       } catch (err) {
-        console.error("🚨 최초 마이크 연결 실패:", err);
+        console.error("최초 마이크 연결 실패:", err);
         setIsMicOn(false);
         await refreshFriends();
         getSocket()?.emit('room:request_state', { roomId });
@@ -291,13 +291,13 @@ export default function RoomPage() {
         setIsAutoplayBlocked(false);
         lastSeekTimeRef.current = 0;
         
-        // ✨ 새 노래가 시작되면 오프셋 잠금을 해제합니다.
+        // 새 노래가 시작되면 오프셋 잠금을 해제
         offsetLockedRef.current = false;
 
         const isSinger = String(user?.id).trim() === String(data.singerId).trim();
         const delayMs = typeof getAudioDelay === 'function' ? getAudioDelay(data.singerId, isSinger) : 150;
         
-        // ✨ 수신자가 빠르다면 이 값을 300~400 정도로 올리기
+        // 수신자가 빠르다면 이 값을 300~400 정도로 올리기
         const BUFFER_MS = 300; 
         offsetRef.current = (delayMs + BUFFER_MS) / 1000;
       }
@@ -335,7 +335,7 @@ export default function RoomPage() {
       if (currentVideo && currentUser && String(currentUser.id).trim() !== String(currentVideo.singerId).trim()) {
         if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === 'function') {
           const myTime = ytPlayerRef.current.getCurrentTime();
-          // ✨ 아고라 통계가 잡히면 딱 한 번만 갱신하고 잠금
+          // 아고라 통계가 잡히면 딱 한 번만 갱신하고 잠금
           if (!offsetLockedRef.current) {
             const delayMs = typeof getAudioDelay === 'function' ? getAudioDelay(currentVideo.singerId, false) : 150;
             if (delayMs !== 150) { // 150이 아니라는 건 실제 통계가 확보되었다는 뜻
@@ -345,11 +345,10 @@ export default function RoomPage() {
               console.log(`[Sync] 🔒 네트워크 지연 확보 및 잠금: ${delayMs}ms (총 오프셋: ${offsetRef.current}s)`);
             }
           }
-          // ✨ 고정 상수 대신 offsetRef.current 사용
+          // 고정 상수 대신 offsetRef.current 사용
           const targetTime = Math.max(0, time - offsetRef.current);
           const diff = Math.abs(myTime - targetTime);
-          const now = Date.now();
-          // ✨ 핵심 수정 
+          const now = Date.now(); 
           const drift = myTime - targetTime;
           const timeSinceLastSeek = now - lastSeekTimeRef.current;
           if (Math.abs(drift) > 0.2 && timeSinceLastSeek > 3000) {
@@ -358,7 +357,7 @@ export default function RoomPage() {
             lastSeekTimeRef.current = now;
           }
         }
-        setIsVideoPlaying(true); // 이제 정상 재생 중일 때만 로딩창 제거
+        setIsVideoPlaying(true); 
       }
     };
 
@@ -371,7 +370,7 @@ export default function RoomPage() {
     };
 
     const onRoomAnnounce = (data) => {
-      console.log('📢 시스템 공지:', data.message);
+      console.log('시스템 공지:', data.message);
 
       if (isTtsOnRef.current && data.audioData) {
         const audio = new Audio(`data:audio/mp3;base64,${data.audioData}`);
@@ -417,7 +416,7 @@ export default function RoomPage() {
 
     if (!isSinger && currentVideo.startAt) {
       const elapsed = (Date.now() - currentVideo.startAt) / 1000;
-      // ✨ 고정 상수 대신 offsetRef.current 사용
+      // 고정 상수 대신 offsetRef.current 사용
       const seekTo = Math.max(0, elapsed - offsetRef.current);
       console.log(`[Sync] 중간입장 계산: elapsed=${elapsed.toFixed(2)}s → seek=${seekTo.toFixed(2)}s`);
       event.target.seekTo(seekTo, true);
@@ -429,7 +428,7 @@ export default function RoomPage() {
       if (ytPlayerRef.current && typeof ytPlayerRef.current.getPlayerState === 'function') {
         const state = ytPlayerRef.current.getPlayerState();
         if (state !== 1 && state !== 3) {
-          console.log("🚨 자동재생 차단 감지됨. 터치 가능하도록 잠금을 풉니다.");
+          console.log("자동재생 차단 감지됨. 터치 가능하도록 잠금을 풉니다.");
           setIsAutoplayBlocked(true);
         }
       }
@@ -456,7 +455,6 @@ export default function RoomPage() {
       if (amISingingNow) {
         if (!syncIntervalRef.current) {
           
-          // ✨ [수정됨] .then() 제거 및 동기식으로 올바르게 시간 가져오기
           const broadcastSync = () => {
             try {
               if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
@@ -610,7 +608,7 @@ export default function RoomPage() {
 
   const currentTurnUser = participants.find(p => String(p.id).trim() === String(currentTurnId).trim());
 
-  // ✨참가자 목록 정렬: 현재 노래하는 사람을 가장 위로 올리고, 나머지는 원래 순서 유지
+  // 참가자 목록 정렬: 현재 노래하는 사람을 가장 위로 올리고, 나머지는 원래 순서 유지
   const sortedParticipants = participants;
 
   return (

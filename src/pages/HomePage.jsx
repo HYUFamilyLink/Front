@@ -62,7 +62,6 @@ export default function HomePage() {
     const onRoomState = (data) => {
       setLoadingType(null); 
       if (data.roomId) {
-        // ✨ [핵심 해결] 현재 내가 참가자 목록에 있는지 검사합니다. (Stale Closure 방지를 위해 getState 사용)
         const currentUser = useAuthStore.getState().user;
         const amIInRoom = data.participants?.some(
           (p) => String(p.id).trim() === String(currentUser?.id).trim()
