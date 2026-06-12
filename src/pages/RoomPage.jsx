@@ -345,7 +345,7 @@ export default function RoomPage() {
               console.log(`[Sync] 네트워크 지연 확보 및 잠금: ${delayMs}ms (총 오프셋: ${offsetRef.current}s)`);
             }
           }
-          // 고정 상수 대신 offsetRef.current 사용
+          // 고정 상수 대신 RTT 오프셋 사용!!!
           const targetTime = Math.max(0, time - offsetRef.current);
           const diff = Math.abs(myTime - targetTime);
           const now = Date.now(); 
