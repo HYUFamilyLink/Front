@@ -335,14 +335,14 @@ export default function RoomPage() {
       if (currentVideo && currentUser && String(currentUser.id).trim() !== String(currentVideo.singerId).trim()) {
         if (ytPlayerRef.current && typeof ytPlayerRef.current.seekTo === 'function') {
           const myTime = ytPlayerRef.current.getCurrentTime();
-          // 아고라 통계가 잡히면 딱 한 번만 갱신하고 잠금
+          // 아고라 통계가 잡히면 딱 한 번만 갱신
           if (!offsetLockedRef.current) {
             const delayMs = typeof getAudioDelay === 'function' ? getAudioDelay(currentVideo.singerId, false) : 150;
             if (delayMs !== 150) { // 150이 아니라는 건 실제 통계가 확보되었다는 뜻
               const BUFFER_MS = 0; // onSongPlay와 동일하게 유지
               offsetRef.current = (delayMs + BUFFER_MS) / 1000;
               offsetLockedRef.current = true; // 갱신 후 잠금!
-              console.log(`[Sync] 🔒 네트워크 지연 확보 및 잠금: ${delayMs}ms (총 오프셋: ${offsetRef.current}s)`);
+              console.log(`[Sync] 네트워크 지연 확보 및 잠금: ${delayMs}ms (총 오프셋: ${offsetRef.current}s)`);
             }
           }
           // 고정 상수 대신 offsetRef.current 사용
