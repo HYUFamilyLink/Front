@@ -1,16 +1,19 @@
 # FamilyLink - Frontend
 
 React + Vite 기반 프론트엔드 서비스
+FamilyLink는 멀티플랫폼(Web, App, VR) 사용자가 함께 모여 실시간으로 노래하고 소통할 수 있는 실시간 온라인 노래방 서비스의 프론트엔드다. 
+
+단순한 음성 채팅을 넘어, YouTube MR 영상과 WebRTC 오디오 간의 밀리초(ms) 단위 동기화를 구현하여 끊김 없이 노래방 경험을 제공에 중점으로 개발하였다.
 
 ## 기술 스택
 
-| 기술 | 버전 |
+| 분류 | 기술 및 라이브러리 |
 |------|------|
-| React | 19 |
-| Vite | 8 |
-| React Router | 7 |
-| Zustand | 5 |
-| Socket.IO Client | 4 |
+| **Core** | React 19, Vite, React Router 7 |
+| **State Management** | Zustand 5 (전역 상태 관리) |
+| **Real-time Comms** | Socket.IO Client 4 (상태 동기화), Agora RTC (음성) |
+| **Media** | react-youtube (IFrame API 제어) |
+| **Network** | Axios (API 호출) |
 
 ## 프로젝트 구조
 
